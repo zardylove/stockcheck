@@ -18,11 +18,10 @@ def load_urls(file_path="urls.txt"):
 
 def send_alert(url):
     data = {
-        "content": f"🚨 **STOCK ALERT** 🚨\nProduct may be in 
-stock:\n{url}"
+        "content": f"🚨 **STOCK ALERT** 🚨\nProduct may be in stock:\n{url}"
     }
     try:
-        r = requests.post(THE_KEY, json=data)
+        r = requests.post(DISCORD_WEBHOOK, json=data)
         if r.status_code == 204:
             print(f"✅ Alert sent for {url}")
         else:
