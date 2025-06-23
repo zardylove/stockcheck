@@ -34,8 +34,28 @@ def check_url(url):
         r = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
         text = soup.get_text().lower()
-        if any(term in text for term in ["add to cart", "add to basket", 
-"in stock", "buy now"]):
+        
+        # Check for out of stock indicators first
+        out_of_stock_terms = [
+            "out of stock", "sold out", "unavailable", "notify when available",
+            "currently unavailable", "temporarily out of stock", "pre-order",
+            "coming soon", "not in stock", "stock: 0"
+        ]
+        
+        if any(term in text for term in out_of_stock_terms):
+            print(f"❌ Not in stock: {url}")
+            return
+        
+        # Look for positive stock indicators
+        in_stock_terms = ["in stock", "available now", "buy now"]
+        
+        # Check for enabled add to cart buttons (more reliable)
+        add_buttons = soup.find_all(['button', 'input'], 
+                                   text=lambda t: t and 'add to' in t.lower())
+        enabled_buttons = [btn for btn in add_buttons 
+                          if not btn.get('disabled') and 'disabled' not in btn.get('class', [])]
+        
+        if any(term in text for term in in_stock_terms) or enabled_buttons:
             print(f"🔔 Possible stock at: {url}")
             send_alert(url)
         else:
