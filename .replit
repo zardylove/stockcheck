@@ -13,3 +13,45 @@ requiredFiles = [".replit", "replit.nix"]
 [deployment]
 run = ["python3", "main.py"]
 deploymentTarget = "cloudrun"
+
+[workflows]
+runButton = "pris-sb"
+
+[[workflows.workflow]]
+name = "pris-bb"
+mode = "parallel"
+author = 44144161
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python prisbb.py"
+
+[[workflows.workflow]]
+name = "151-bb"
+mode = "parallel"
+author = 44144161
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python 151bb.py"
+
+[[workflows.workflow]]
+name = "pris-spc"
+mode = "parallel"
+author = 44144161
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python prisspc.py"
+
+[[workflows.workflow]]
+name = "pris-sb"
+mode = "parallel"
+author = 44144161
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python prissb.py"
+
+[agent]
+expertMode = true
