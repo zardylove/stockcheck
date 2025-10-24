@@ -22,7 +22,8 @@ MOBILE_HEADERS = {
 OUT_OF_STOCK_TERMS = [
     "out of stock", "sold out", "unavailable", "notify when available",
     "currently unavailable", "temporarily out of stock", "pre-order",
-    "coming soon", "not in stock", "no stock available", "stock: 0"
+    "coming soon", "not in stock", "no stock available", "stock: 0",
+    "notify me when in stock"
 ]
 
 # In stock phrases
