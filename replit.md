@@ -4,12 +4,14 @@ This is a Python-based stock monitoring system that tracks Pokemon Trading Card 
 
 ## Main Bot: store_monitor.py
 
-The primary bot (`store_monitor.py`) monitors 51 UK Pokemon TCG store pages from `Websites.txt`:
+The primary bot (`store_monitor.py`) monitors 49 UK Pokemon TCG store pages from `Websites.txt`:
 - Detects **new products** added to store pages
 - Detects **restocks** (products changing from out-of-stock to in-stock)
 - Sends Discord alerts via the `STOCK` webhook
-- Stores product state in `product_state.json` between scans
+- Stores product state in **PostgreSQL database** (persists across republishes)
 - Runs continuously with no delay between scan cycles
+- Development mode: Console logging only, no Discord pings
+- Production mode (deployed): Sends Discord alerts
 
 ## Deployment
 
@@ -78,14 +80,14 @@ Preferred communication style: Simple, everyday language.
 
 ## State Management
 
-**File-Based State Persistence** (store_monitor.py): Uses JSON file to track which products have been seen before to avoid duplicate alerts.
+**PostgreSQL Database Persistence** (store_monitor.py): Uses PostgreSQL database to track which products have been seen before to avoid duplicate alerts.
 
 **Implementation**:
-- STATE_FILE = "product_state.json"
-- Tracks product URLs or identifiers
-- Persists between script restarts
+- Table: `product_state` with store_url, product_url, product_name, in_stock, first_seen, last_seen
+- Tracks product URLs and stock status
+- Persists across republishes and restarts (solves the duplicate alert problem)
 
-**Rationale**: Prevents alert fatigue by only notifying on genuine stock changes rather than every check cycle.
+**Rationale**: Prevents alert fatigue by only notifying on genuine stock changes. Database storage ensures state persists across deployments unlike file-based storage which resets on republish.
 
 ## Notification System
 

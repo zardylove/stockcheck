@@ -5,10 +5,41 @@ import os
 import random
 import json
 import re
+import psycopg2
 from urllib.parse import urljoin, urlparse, urlunparse
 
 DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+def get_db_connection():
+    """Get database connection."""
+    return psycopg2.connect(DATABASE_URL)
+
+def init_database():
+    """Initialize the database table for product state."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS product_state (
+                store_url TEXT NOT NULL,
+                product_url TEXT NOT NULL,
+                product_name TEXT,
+                in_stock BOOLEAN DEFAULT TRUE,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (store_url, product_url)
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("✅ Database initialized")
+        return True
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        return False
 
 def normalize_product_url(url):
     """Normalize URL by removing query strings, fragments, and standardizing format."""
@@ -21,8 +52,8 @@ def normalize_product_url(url):
         return normalized
     except:
         return url
+
 CHECK_INTERVAL = 0
-STATE_FILE = "product_state.json"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
@@ -60,15 +91,55 @@ def load_urls(file_path="Websites.txt"):
         return []
 
 def load_state():
+    """Load product state from database."""
+    state = {}
     try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT store_url, product_url, product_name, in_stock FROM product_state")
+        rows = cur.fetchall()
+        for store_url, product_url, product_name, in_stock in rows:
+            if store_url not in state:
+                state[store_url] = {}
+            state[store_url][product_url] = {
+                "name": product_name,
+                "in_stock": in_stock
+            }
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error loading state from database: {e}")
+    return state
+
+def save_product(store_url, product_url, product_name, in_stock):
+    """Save a single product to the database."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (store_url, product_url) 
+            DO UPDATE SET product_name = EXCLUDED.product_name, 
+                          in_stock = EXCLUDED.in_stock,
+                          last_seen = CURRENT_TIMESTAMP
+        """, (store_url, product_url, product_name, in_stock))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Error saving product: {e}")
+        return False
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    """Save entire state to database (for compatibility)."""
+    for store_url, products in state.items():
+        for product_url, product_data in products.items():
+            if isinstance(product_data, dict):
+                save_product(store_url, product_url, product_data.get("name"), product_data.get("in_stock", True))
+            else:
+                save_product(store_url, product_url, None, True)
 
 def get_headers_for_url(url):
     mobile_sites = [
@@ -303,6 +374,11 @@ def check_store_page(url, previous_products):
 
 def main():
     print("🚀 Starting Store Monitor Bot...")
+    
+    if not init_database():
+        print("❌ Failed to initialize database. Exiting.")
+        return
+    
     print(f"📋 Loading URLs from Websites.txt...")
     
     urls = load_urls()
@@ -315,6 +391,10 @@ def main():
     
     state = load_state()
     first_run = len(state) == 0
+    
+    if not first_run:
+        total_products = sum(len(products) for products in state.values())
+        print(f"📊 Loaded {total_products} products from database")
     
     if first_run:
         print("🆕 First run - building initial product database...")
