@@ -93,6 +93,9 @@ def load_urls(file_path="Websites.txt"):
 def load_state():
     """Load product state from database."""
     state = {}
+    if not DATABASE_URL:
+        print("❌ DATABASE_URL not set! Cannot load state.")
+        return state
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -107,8 +110,10 @@ def load_state():
             }
         cur.close()
         conn.close()
+        print(f"📂 Database: Loaded {len(rows)} products from {len(state)} stores")
     except Exception as e:
-        print(f"⚠️ Error loading state from database: {e}")
+        print(f"❌ Error loading state from database: {e}")
+        print("   Bot will treat this as first run - no alerts will be sent")
     return state
 
 def save_product(store_url, product_url, product_name, in_stock):
@@ -413,10 +418,6 @@ def main():
     
     state = load_state()
     first_run = len(state) == 0
-    
-    if not first_run:
-        total_products = sum(len(products) for products in state.values())
-        print(f"📊 Loaded {total_products} products from database")
     
     if first_run:
         print("🆕 First run - building initial product database...")
