@@ -5,9 +5,21 @@ import os
 import random
 import json
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 DISCORD_WEBHOOK = os.getenv("STOCK")
+
+def normalize_product_url(url):
+    """Normalize URL by removing query strings, fragments, and standardizing format."""
+    try:
+        parsed = urlparse(url)
+        path = parsed.path.rstrip('/')
+        if not path:
+            return None
+        normalized = urlunparse((parsed.scheme, parsed.netloc.lower(), path, '', '', ''))
+        return normalized
+    except:
+        return url
 CHECK_INTERVAL = 0
 STATE_FILE = "product_state.json"
 
@@ -179,8 +191,9 @@ def extract_products(soup, base_url):
         else:
             is_in_stock = True
         
-        if full_url not in products:
-            products[full_url] = {
+        normalized_url = normalize_product_url(full_url)
+        if normalized_url and normalized_url not in products:
+            products[normalized_url] = {
                 "name": product_name,
                 "in_stock": is_in_stock
             }
