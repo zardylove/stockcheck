@@ -333,8 +333,7 @@ def main():
                 for change in changes:
                     total_changes += 1
                     if change["type"] == "new":
-                        stock_status = "✅ In Stock" if change["in_stock"] else "❌ Out of Stock"
-                        message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**\nStatus: {stock_status}"
+                        message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**"
                         print(f"    🆕 NEW: {change['name'][:50]}")
                         send_alert(message, change["url"])
                     elif change["type"] == "restock":
