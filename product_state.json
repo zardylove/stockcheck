@@ -2701,11 +2701,11 @@
   },
   "https://titancards.co.uk/collections/pokemon-sealed-products?sort_by=created-descending": {
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.v.availability=1&sort_by=created-descending": {
-      "name": "In stock\n                  \n                    (158)",
+      "name": "In stock\n                  \n                    (159)",
       "in_stock": true
     },
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.v.availability=0&sort_by=created-descending": {
-      "name": "Out of stock\n                  \n                    (371)",
+      "name": "Out of stock\n                  \n                    (370)",
       "in_stock": false
     },
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.p.product_type=Pokemon&sort_by=created-descending": {
