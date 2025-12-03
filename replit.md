@@ -51,10 +51,27 @@ Preferred communication style: Simple, everyday language.
 
 **Text-Based Availability Detection**: Instead of relying on structured data or APIs, the system scrapes HTML content and searches for stock-related phrases.
 
-**Detection Criteria**:
-- OUT_OF_STOCK_TERMS: List of phrases indicating unavailability
-- IN_STOCK_TERMS: List of phrases indicating availability
-- Case-insensitive matching across page content
+**Detection Priority**:
+1. If OUT_OF_STOCK term found → Product is out of stock
+2. If IN_STOCK term found (no out of stock term) → Product is in stock
+3. If neither found → Assume in stock (better to alert than miss)
+
+**OUT_OF_STOCK_TERMS** (indicates unavailable):
+- out of stock, sold out, unavailable, notify when available
+- currently unavailable, temporarily out of stock, pre-order
+- coming soon, not in stock, no stock available, stock: 0
+- notify me when in stock, out-of-stock, soldout, backorder
+- back order, waitlist, wait list, notify me, email when available
+
+**IN_STOCK_TERMS** (indicates available):
+- add to cart, add to basket, add to bag, add to trolley
+- add to order, in stock, available, available now
+- available to buy, buy now, order now, item in stock
+- stock available, stock: available, instock, in-stock
+- add to shopping bag, add to shopping cart, purchase now
+- shop now, get it now, ready to ship, ships today
+- in stock now, hurry, only a few left, low stock
+- limited stock, few remaining
 
 **Rationale**: E-commerce sites rarely provide consistent APIs or structured data for stock status. Text-based detection works across diverse site implementations.
 

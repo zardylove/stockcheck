@@ -23,7 +23,19 @@ OUT_OF_STOCK_TERMS = [
     "out of stock", "sold out", "unavailable", "notify when available",
     "currently unavailable", "temporarily out of stock", "pre-order",
     "coming soon", "not in stock", "no stock available", "stock: 0",
-    "notify me when in stock", "out-of-stock", "soldout"
+    "notify me when in stock", "out-of-stock", "soldout", "backorder",
+    "back order", "waitlist", "wait list", "notify me", "email when available"
+]
+
+IN_STOCK_TERMS = [
+    "add to cart", "add to basket", "add to bag", "add to trolley",
+    "add to order", "in stock", "available", "available now",
+    "available to buy", "buy now", "order now", "item in stock",
+    "stock available", "stock: available", "instock", "in-stock",
+    "add to shopping bag", "add to shopping cart", "purchase now",
+    "shop now", "get it now", "ready to ship", "ships today",
+    "in stock now", "hurry", "only a few left", "low stock",
+    "limited stock", "few remaining"
 ]
 
 def load_urls(file_path="Websites.txt"):
@@ -152,12 +164,20 @@ def extract_products(soup, base_url):
         
         card_text = get_product_card_text(link)
         
-        is_out_of_stock = any(term in card_text for term in OUT_OF_STOCK_TERMS)
+        has_out_of_stock = any(term in card_text for term in OUT_OF_STOCK_TERMS)
+        has_in_stock = any(term in card_text for term in IN_STOCK_TERMS)
+        
+        if has_out_of_stock:
+            is_in_stock = False
+        elif has_in_stock:
+            is_in_stock = True
+        else:
+            is_in_stock = True
         
         if full_url not in products:
             products[full_url] = {
                 "name": product_name,
-                "in_stock": not is_out_of_stock
+                "in_stock": is_in_stock
             }
     
     return products
