@@ -20,7 +20,6 @@ https://gatheringgames.co.uk/collections/pokemon
 https://www.hammerheadtcg.co.uk/collections/english-pokemon-cards?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
 https://www.infernocards.co.uk/shop
 https://jetcards.uk/collections/pokemon-trading-cards
-https://www.johnlewis.com/search?search-term=pokemon%20trading%20card%20game&suggestion=true
 https://www.kerrisontoys.co.uk/pokemon-tcg-c-1504.html
 https://magicmadhouse.co.uk/pokemon?Filters=products%3ABooster%2520Box%252CBooster%2520Pack
 https://www.themeeplerooms.co.uk/collections/pokemon
@@ -43,7 +42,6 @@ https://www.tofs.com/search?q=pokemon+tcg&options%5Bprefix%5D=last&type=product
 https://www.toybarnhaus.co.uk/collections/pokemon
 https://www.toytownstores.com/pok%C3%A9mon-t72
 https://travellingman.com/collections/pokemon-tcg
-https://www.very.co.uk/search/pokemon-tcg
 https://www.waylandgames.co.uk/search?query=POKEMON+TCG
 https://www.westendgames.co.uk/collections/pokemon
 https://www.wonderlandmodels.com/brands/pokemon/

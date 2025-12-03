@@ -8,7 +8,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 DISCORD_WEBHOOK = os.getenv("STOCK")
-CHECK_INTERVAL = 10
+CHECK_INTERVAL = 0
 STATE_FILE = "product_state.json"
 
 HEADERS = {
