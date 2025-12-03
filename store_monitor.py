@@ -50,7 +50,7 @@ def init_database():
         print(f"❌ Database error: {e}")
         return False
 
-ALERT_COOLDOWN_HOURS = 24
+ALERT_COOLDOWN_HOURS = 4
 
 def normalize_product_url(url):
     """Normalize URL by removing query strings, fragments, and standardizing format."""
