@@ -36,15 +36,6 @@ task = "shell.exec"
 args = "python 151bb.py"
 
 [[workflows.workflow]]
-name = "pris-spc"
-mode = "parallel"
-author = 44144161
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python prisspc.py"
-
-[[workflows.workflow]]
 name = "Project"
 mode = "parallel"
 author = "agent"
