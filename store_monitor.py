@@ -58,7 +58,12 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 def get_headers_for_url(url):
-    if "very.co.uk" in url or "freemans.com" in url or "jdwilliams.co.uk" in url or "jacamo.co.uk" in url:
+    mobile_sites = [
+        "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
+        "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
+        "johnlewis.com", "hamleys.com"
+    ]
+    if any(site in url for site in mobile_sites):
         return MOBILE_HEADERS
     return HEADERS
 
@@ -234,10 +239,17 @@ def is_product_url(url, base_url):
     
     return False
 
+def get_timeout_for_url(url):
+    slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
+    if any(site in url for site in slow_sites):
+        return 60
+    return 30
+
 def check_store_page(url, previous_products):
     try:
         headers = get_headers_for_url(url)
-        r = requests.get(url, headers=headers, timeout=30)
+        timeout = get_timeout_for_url(url)
+        r = requests.get(url, headers=headers, timeout=timeout)
         
         if r.status_code != 200:
             print(f"⚠️ Failed to fetch {url} (status {r.status_code})")

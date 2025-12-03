@@ -1712,6 +1712,10 @@
     }
   },
   "https://www.themeeplerooms.co.uk/collections/pokemon": {
+    "https://www.themeeplerooms.co.uk/products/pokemon-tcg-mega-charizard-ultra-premium-collection": {
+      "name": "Pok\u00e9mon TCG: Mega Charizard Ultra-Premium Collection",
+      "in_stock": true
+    },
     "https://www.themeeplerooms.co.uk/products/pokemon-poke-ball-full-view-deck-box": {
       "name": "Pok\u00e9mon: Pok\u00e9 Ball - Full-View Deck Box",
       "in_stock": true
@@ -3277,12 +3281,7 @@
       "in_stock": true
     }
   },
-  "https://www.tofs.com/search?q=pokemon+tcg&options%5Bprefix%5D=last&type=product": {
-    "https://www.tofs.com/products/pokemon-mega-latias-ex-box?_pos=1&_sid=73fe6309a&_ss=r": {
-      "name": "Pokemon Mega Latias Ex Box",
-      "in_stock": true
-    }
-  },
+  "https://www.tofs.com/search?q=pokemon+tcg&options%5Bprefix%5D=last&type=product": {},
   "https://www.toybarnhaus.co.uk/collections/pokemon": {
     "https://www.toybarnhaus.co.uk/products/pokemon-tcg-klara-premium-tournament-collection": {
       "name": "Pok\u00e9mon TCG: Klara Premium Tournament Collection",
