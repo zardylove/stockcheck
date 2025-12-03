@@ -12,6 +12,11 @@ DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+SHOPIFY_STORES_WITH_ANTIBOT = [
+    "zingaentertainment.com",
+    "themeeplerooms.co.uk",
+]
+
 def get_db_connection():
     """Get database connection."""
     return psycopg2.connect(DATABASE_URL)
@@ -376,6 +381,12 @@ def check_store_page(url, previous_products):
         
         prev_count = len(previous_products)
         curr_count = len(current_products)
+        
+        is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
+        
+        if is_shopify_antibot and prev_count > 0 and curr_count < prev_count:
+            print(f"⚠️ BLOCKED ({curr_count} vs {prev_count} cached, Shopify anti-bot)")
+            return previous_products, []
         
         if prev_count >= 5 and curr_count < prev_count * 0.3:
             print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
