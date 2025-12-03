@@ -741,19 +741,19 @@
     }
   },
   "https://dansolotcg.co.uk/collections/pokemon?filter.v.availability=1&filter.v.price.gte=&filter.v.price.lte=&sort_by=best-selling": {
-    "https://dansolotcg.co.uk/products/pokemon-tcg-combined-powers-premium-collection?_pos=1&_fid=7820271fd&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-combined-powers-premium-collection?_pos=1&_fid=051ac5dc0&_ss=c": {
       "name": "Pok\u00e9mon TCG: Combined Powers Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-terapagos-ex-ultra-premium-collection?_pos=2&_fid=7820271fd&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-terapagos-ex-ultra-premium-collection?_pos=2&_fid=051ac5dc0&_ss=c": {
       "name": "Pok\u00e9mon TCG: Terapagos ex Ultra-Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-charizard-ex-super-premium-collection?_pos=3&_fid=7820271fd&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-charizard-ex-super-premium-collection?_pos=3&_fid=051ac5dc0&_ss=c": {
       "name": "Pok\u00e9mon TCG: Charizard ex Super-Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-trainer-s-toolkit-2024?_pos=4&_fid=7820271fd&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-trainer-s-toolkit-2024?_pos=4&_fid=051ac5dc0&_ss=c": {
       "name": "Pok\u00e9mon TCG: Trainer\u2019s Toolkit 2024",
       "in_stock": true
     }
