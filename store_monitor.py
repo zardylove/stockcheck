@@ -8,7 +8,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 DISCORD_WEBHOOK = os.getenv("STOCK")
-CHECK_INTERVAL = 120
+CHECK_INTERVAL = 10
 STATE_FILE = "product_state.json"
 
 HEADERS = {
@@ -93,10 +93,36 @@ def get_product_card_text(link):
     
     return card_text
 
+def find_product_container(soup):
+    container_selectors = [
+        '.productListing', '.product-listing', '.products-grid', '.product-grid',
+        '.products', '#products', '.product-list', '#product-list',
+        '.categoryProducts', '.category-products', '.listing-products',
+        '[class*="product-list"]', '[class*="productList"]',
+        '.collection-products', '.grid-products', '.product-items',
+        'main', '.main-content', '#main-content', '.content-main'
+    ]
+    
+    for selector in container_selectors:
+        try:
+            container = soup.select_one(selector)
+            if container:
+                links = container.find_all('a', href=True)
+                if len(links) >= 3:
+                    return container
+        except:
+            continue
+    
+    return None
+
 def extract_products(soup, base_url):
     products = {}
     
-    product_links = soup.find_all('a', href=True)
+    container = find_product_container(soup)
+    if container:
+        product_links = container.find_all('a', href=True)
+    else:
+        product_links = soup.find_all('a', href=True)
     
     for link in product_links:
         href = link.get('href', '')
@@ -136,6 +162,12 @@ def extract_products(soup, base_url):
     
     return products
 
+def get_category_id_from_url(url):
+    match = re.search(r'-c-(\d+(?:_\d+)*)', url)
+    if match:
+        return match.group(1)
+    return None
+
 def is_product_url(url, base_url):
     if not url.startswith("http"):
         return False
@@ -145,6 +177,14 @@ def is_product_url(url, base_url):
     
     if base_domain != url_domain:
         return False
+    
+    base_category = get_category_id_from_url(base_url)
+    if base_category:
+        if re.search(r'-c-\d+', url):
+            url_category = get_category_id_from_url(url)
+            if url_category and url_category != base_category:
+                if not url_category.startswith(base_category):
+                    return False
     
     product_patterns = [
         r'/product[s]?/', r'/item/', r'/p/', r'/shop/',
@@ -158,7 +198,8 @@ def is_product_url(url, base_url):
         r'/login', r'/register', r'/wishlist', r'/search',
         r'/page/', r'/category/', r'/collections/?$',
         r'/cdn/', r'/static/', r'\.js$', r'\.css$',
-        r'\.jpg$', r'\.png$', r'\.gif$', r'/cdn-cgi/'
+        r'\.jpg$', r'\.png$', r'\.gif$', r'/cdn-cgi/',
+        r'-c-\d+(?:_\d+)*/?(?:\?|$)'
     ]
     
     url_lower = url.lower()
