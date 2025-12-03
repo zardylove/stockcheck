@@ -4,19 +4,18 @@ This is a Python-based stock monitoring system that tracks Pokemon Trading Card 
 
 ## Main Bot: store_monitor.py
 
-The primary bot (`store_monitor.py`) monitors 58 UK Pokemon TCG store pages from `Websites.txt`:
+The primary bot (`store_monitor.py`) monitors 51 UK Pokemon TCG store pages from `Websites.txt`:
 - Detects **new products** added to store pages
 - Detects **restocks** (products changing from out-of-stock to in-stock)
 - Sends Discord alerts via the `STOCK` webhook
 - Stores product state in `product_state.json` between scans
+- Runs continuously with no delay between scan cycles
 
-## Legacy Bots (Product-Specific)
+## Deployment
 
-Additional bots for tracking specific product URLs:
-- `151bb.py` - Pokemon 151 Booster Bundles (URLs in `151bb.txt`)
-- `prisbb.py` - Prismatic Evolutions Booster Bundles
-- `prissb.py` - Prismatic Evolutions Surprise Boxes  
-- `prisspc.py` - Prismatic Evolutions Super Premium Collections
+Configured for Reserved VM deployment ($20/month with Replit Core credits):
+- Run command: `python3 store_monitor.py`
+- Runs 24/7 on always-on cloud server
 
 # User Preferences
 
