@@ -16,16 +16,9 @@ https://dragonvault.gg/collections/booster-packs?filter.v.availability=1&filter.
 https://eclipsecards.com/collections/pokemon-tcg
 https://endocollects.co.uk/collections/pokemon-booster-boxes?sort_by=created-descending
 https://forbiddenplanet.com/catalog/gaming/?tag=universe:pokemon
-https://www.game.co.uk/pokemon/trading-cards
-https://www.gameon.games/collections/pokemon-trading-card-game?sort_by=created-descending&filter.v.price.gte=&filter.v.price.lte=
 https://gatheringgames.co.uk/collections/pokemon
-https://www.hamleys.com/catalogsearch/result/?q=pokemon+trading+card+game
 https://www.hammerheadtcg.co.uk/collections/english-pokemon-cards?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
-https://www.hillscards.co.uk/trading-card-games-c78/sealed-products-c92/boosters-c98/pokemon-trading-card-game-m2#sort7
-https://hmv.com/store/pop-culture/trading-cards?categories=format&format=Trading%2BCards%2B(Tgc)
 https://www.infernocards.co.uk/shop
-https://www.jacamo.co.uk/shop/s?text=pokemon+tcg
-https://www.jdwilliams.co.uk/shop/s?text=pokemon&nofollowind=true
 https://jetcards.uk/collections/pokemon-trading-cards
 https://www.johnlewis.com/search?search-term=pokemon%20trading%20card%20game&suggestion=true
 https://www.kerrisontoys.co.uk/pokemon-tcg-c-1504.html
