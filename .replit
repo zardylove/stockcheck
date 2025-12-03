@@ -60,15 +60,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Stock Checker"
+args = "Store Monitor"
 
 [[workflows.workflow]]
-name = "Stock Checker"
+name = "Store Monitor"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python3 151bb.py"
+args = "python3 store_monitor.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
