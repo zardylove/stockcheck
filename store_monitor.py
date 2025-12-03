@@ -34,8 +34,12 @@ def init_database():
                 in_stock BOOLEAN DEFAULT TRUE,
                 first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_alerted TIMESTAMP,
                 PRIMARY KEY (store_url, product_url)
             )
+        """)
+        cur.execute("""
+            ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_alerted TIMESTAMP
         """)
         conn.commit()
         cur.close()
@@ -45,6 +49,8 @@ def init_database():
     except Exception as e:
         print(f"❌ Database error: {e}")
         return False
+
+ALERT_COOLDOWN_HOURS = 24
 
 def normalize_product_url(url):
     """Normalize URL by removing query strings, fragments, and standardizing format."""
@@ -104,14 +110,15 @@ def load_state():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT store_url, product_url, product_name, in_stock FROM product_state")
+        cur.execute("SELECT store_url, product_url, product_name, in_stock, last_alerted FROM product_state")
         rows = cur.fetchall()
-        for store_url, product_url, product_name, in_stock in rows:
+        for store_url, product_url, product_name, in_stock, last_alerted in rows:
             if store_url not in state:
                 state[store_url] = {}
             state[store_url][product_url] = {
                 "name": product_name,
-                "in_stock": in_stock
+                "in_stock": in_stock,
+                "last_alerted": last_alerted
             }
         cur.close()
         conn.close()
@@ -141,6 +148,31 @@ def save_product(store_url, product_url, product_name, in_stock):
     except Exception as e:
         print(f"⚠️ Error saving product: {e}")
         return False
+
+def mark_alerted(store_url, product_url):
+    """Update last_alerted timestamp for a product."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE product_state 
+            SET last_alerted = CURRENT_TIMESTAMP
+            WHERE store_url = %s AND product_url = %s
+        """, (store_url, product_url))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error marking alerted: {e}")
+
+def should_alert(last_alerted):
+    """Check if enough time has passed since last alert (24 hour cooldown)."""
+    if last_alerted is None:
+        return True
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    cooldown = timedelta(hours=ALERT_COOLDOWN_HOURS)
+    return (now - last_alerted) > cooldown
 
 def save_state(state):
     """Save entire state to database using batch insert for speed."""
@@ -405,11 +437,15 @@ def check_store_page(url, previous_products):
             else:
                 prev_info = previous_products[product_url]
                 if not prev_info.get("in_stock", False) and product_info["in_stock"]:
-                    changes.append({
-                        "type": "restock",
-                        "name": product_info["name"],
-                        "url": product_url
-                    })
+                    last_alerted = prev_info.get("last_alerted")
+                    if should_alert(last_alerted):
+                        changes.append({
+                            "type": "restock",
+                            "name": product_info["name"],
+                            "url": product_url
+                        })
+                    else:
+                        pass
         
         return current_products, changes
         
@@ -462,10 +498,12 @@ def main():
                         message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**"
                         print(f"    🆕 NEW: {change['name'][:50]}")
                         send_alert(message, change["url"])
+                        mark_alerted(url, change["url"])
                     elif change["type"] == "restock":
                         message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
                         print(f"    📦 RESTOCK: {change['name'][:50]}")
                         send_alert(message, change["url"])
+                        mark_alerted(url, change["url"])
                     time.sleep(1)
             else:
                 print(f"OK ({len(current_products)} products)")
