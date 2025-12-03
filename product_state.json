@@ -741,19 +741,19 @@
     }
   },
   "https://dansolotcg.co.uk/collections/pokemon?filter.v.availability=1&filter.v.price.gte=&filter.v.price.lte=&sort_by=best-selling": {
-    "https://dansolotcg.co.uk/products/pokemon-tcg-combined-powers-premium-collection?_pos=1&_fid=051ac5dc0&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-combined-powers-premium-collection?_pos=1&_fid=d4a7aad13&_ss=c": {
       "name": "Pok\u00e9mon TCG: Combined Powers Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-terapagos-ex-ultra-premium-collection?_pos=2&_fid=051ac5dc0&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-terapagos-ex-ultra-premium-collection?_pos=2&_fid=d4a7aad13&_ss=c": {
       "name": "Pok\u00e9mon TCG: Terapagos ex Ultra-Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-charizard-ex-super-premium-collection?_pos=3&_fid=051ac5dc0&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-charizard-ex-super-premium-collection?_pos=3&_fid=d4a7aad13&_ss=c": {
       "name": "Pok\u00e9mon TCG: Charizard ex Super-Premium Collection",
       "in_stock": true
     },
-    "https://dansolotcg.co.uk/products/pokemon-tcg-trainer-s-toolkit-2024?_pos=4&_fid=051ac5dc0&_ss=c": {
+    "https://dansolotcg.co.uk/products/pokemon-tcg-trainer-s-toolkit-2024?_pos=4&_fid=d4a7aad13&_ss=c": {
       "name": "Pok\u00e9mon TCG: Trainer\u2019s Toolkit 2024",
       "in_stock": true
     }
@@ -1712,10 +1712,6 @@
     }
   },
   "https://www.themeeplerooms.co.uk/collections/pokemon": {
-    "https://www.themeeplerooms.co.uk/products/pokemon-tcg-mega-charizard-ultra-premium-collection": {
-      "name": "Pok\u00e9mon TCG: Mega Charizard Ultra-Premium Collection",
-      "in_stock": true
-    },
     "https://www.themeeplerooms.co.uk/products/pokemon-poke-ball-full-view-deck-box": {
       "name": "Pok\u00e9mon: Pok\u00e9 Ball - Full-View Deck Box",
       "in_stock": true
@@ -2701,11 +2697,11 @@
   },
   "https://titancards.co.uk/collections/pokemon-sealed-products?sort_by=created-descending": {
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.v.availability=1&sort_by=created-descending": {
-      "name": "In stock\n                  \n                    (159)",
+      "name": "In stock\n                  \n                    (158)",
       "in_stock": true
     },
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.v.availability=0&sort_by=created-descending": {
-      "name": "Out of stock\n                  \n                    (370)",
+      "name": "Out of stock\n                  \n                    (371)",
       "in_stock": false
     },
     "https://titancards.co.uk/collections/pokemon-sealed-products?filter.p.product_type=Pokemon&sort_by=created-descending": {
