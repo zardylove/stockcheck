@@ -374,8 +374,11 @@ def check_store_page(url, previous_products):
         soup = BeautifulSoup(r.text, "html.parser")
         current_products = extract_products(soup, url)
         
-        if len(current_products) == 0 and len(previous_products) > 0:
-            print(f"⚠️ BLOCKED (0 products, keeping {len(previous_products)} cached)")
+        prev_count = len(previous_products)
+        curr_count = len(current_products)
+        
+        if prev_count >= 5 and curr_count < prev_count * 0.3:
+            print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
             return previous_products, []
         
         changes = []
