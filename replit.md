@@ -1,0 +1,181 @@
+# Overview
+
+This is a Python-based stock monitoring system that tracks Pokemon Trading Card Game (TCG) product availability across multiple UK retailers. The application scrapes store category pages to detect new products and stock changes, sending real-time Discord notifications.
+
+## Main Bot: store_monitor.py
+
+The primary bot (`store_monitor.py`) monitors 58 UK Pokemon TCG store pages from `Websites.txt`:
+- Detects **new products** added to store pages
+- Detects **restocks** (products changing from out-of-stock to in-stock)
+- Sends Discord alerts via the `STOCK` webhook
+- Stores product state in `product_state.json` between scans
+
+## Legacy Bots (Product-Specific)
+
+Additional bots for tracking specific product URLs:
+- `151bb.py` - Pokemon 151 Booster Bundles (URLs in `151bb.txt`)
+- `prisbb.py` - Prismatic Evolutions Booster Bundles
+- `prissb.py` - Prismatic Evolutions Surprise Boxes  
+- `prisspc.py` - Prismatic Evolutions Super Premium Collections
+
+# User Preferences
+
+Preferred communication style: Simple, everyday language.
+
+# System Architecture
+
+## Core Design Pattern
+
+**Store Page Monitoring**: The main bot (`store_monitor.py`) monitors entire store category pages rather than individual product URLs:
+- Extracts all product links from each store page
+- Compares against previous scan to detect changes
+- Alerts on new products AND restocks
+
+**URL Files**:
+- `Websites.txt` - Store category pages (58 UK retailers)
+- Legacy: `151bb.txt`, `prisbb.txt`, etc. - Specific product URLs
+
+**Adding New URLs**: Simply edit the text files - one URL per line. The bot will pick them up on the next scan.
+
+## Web Scraping Strategy
+
+**Dual User-Agent Approach**: The system uses both desktop and mobile browser user-agents, with site-specific selection logic.
+
+**Implementation**: 
+- Default: Desktop Chrome user-agent for most sites
+- Fallback: Mobile Safari user-agent for stricter sites (very.co.uk, freemans.com, etc.)
+
+**Rationale**: Some e-commerce sites have different bot protection or rendering logic based on the client type. Mobile user-agents often face less aggressive blocking.
+
+## Stock Detection Logic
+
+**Text-Based Availability Detection**: Instead of relying on structured data or APIs, the system scrapes HTML content and searches for stock-related phrases.
+
+**Detection Criteria**:
+- OUT_OF_STOCK_TERMS: List of phrases indicating unavailability
+- IN_STOCK_TERMS: List of phrases indicating availability
+- Case-insensitive matching across page content
+
+**Rationale**: E-commerce sites rarely provide consistent APIs or structured data for stock status. Text-based detection works across diverse site implementations.
+
+**Limitation**: Susceptible to false positives/negatives if sites change their wording.
+
+## State Management
+
+**File-Based State Persistence** (store_monitor.py): Uses JSON file to track which products have been seen before to avoid duplicate alerts.
+
+**Implementation**:
+- STATE_FILE = "product_state.json"
+- Tracks product URLs or identifiers
+- Persists between script restarts
+
+**Rationale**: Prevents alert fatigue by only notifying on genuine stock changes rather than every check cycle.
+
+## Notification System
+
+**Discord Webhook Integration**: All alerts are sent via Discord webhooks rather than email, SMS, or other channels.
+
+**Message Format**:
+```
+🚨 **STOCK ALERT** 🚨
+Product may be in stock:
+[URL]
+```
+
+**Rationale**: Discord webhooks are:
+- Free and unlimited
+- Real-time delivery
+- Easy to integrate (single HTTP POST)
+- Mobile notification support
+- No authentication complexity
+
+## Configuration Management
+
+**Environment Variables for Secrets**: Discord webhook URLs are stored in environment variables rather than hardcoded.
+
+**Per-Script Webhooks**:
+- `_151_BB` - Pokemon 151 Booster Bundle
+- `PRIS_BB` - Prismatic Evolutions Booster Bundle
+- `PRIS_SB` - Prismatic Evolutions Surprise Box
+- `PRIS_SPC` - Prismatic Evolutions Super Premium Collection
+- `STOCK` - General store monitoring
+
+**Rationale**: Allows different Discord channels for different product types, enabling users to subscribe to specific product categories.
+
+## Monitoring Intervals
+
+**Fixed Polling Intervals**: Scripts use time.sleep() with hardcoded intervals (10-120 seconds).
+
+**Current Implementation**:
+- Product-specific monitors: 10 seconds
+- Store-wide monitors: 120 seconds
+
+**Rationale**: Balance between:
+- Rapid detection (shorter intervals)
+- Avoiding rate limiting/IP bans (longer intervals)
+- Resource consumption
+
+**Alternative Considered**: Dynamic intervals based on time of day or historical stock patterns - not implemented for simplicity.
+
+## URL Management
+
+**Text File-Based URL Lists**: Each monitor reads URLs from a corresponding .txt file.
+
+**Format**: One URL per line, whitespace trimmed
+
+**Rationale**: 
+- Non-technical users can edit URLs
+- Version control friendly
+- No database setup required
+- Easy bulk updates
+
+# External Dependencies
+
+## Third-Party Libraries
+
+**requests** - HTTP client for web scraping
+- Purpose: Making HTTP requests to retailer websites
+- Usage: Fetching product pages with custom headers
+
+**BeautifulSoup (bs4)** - HTML parser
+- Purpose: Extracting text content from HTML pages
+- Usage: Searching for stock availability phrases in page content
+
+**Standard Library Dependencies**:
+- `time` - Sleep intervals between checks
+- `os` - Environment variable access
+- `random` - Potential randomization (imported but usage unclear in provided code)
+- `json` - State file persistence
+- `re` - Regular expression matching (store_monitor.py)
+- `urllib.parse` - URL manipulation (store_monitor.py)
+
+## External Services
+
+**Discord Webhooks**
+- Purpose: Real-time stock notifications
+- Integration: HTTP POST with JSON payload
+- Authentication: Webhook URL acts as credential
+- Expected Response: 204 No Content on success
+
+## Target Websites
+
+The application monitors 50+ UK retailers including:
+- Major retailers: Argos, John Lewis, Game, HMV
+- Specialist card shops: Magic Madhouse, Chaos Cards, Total Cards
+- Online marketplaces: Very.co.uk, Freemans, JD Williams
+- Independent shops: Various TCG and toy stores
+
+**Note**: No official APIs are used; all data is scraped from public HTML pages.
+
+## Infrastructure
+
+**Deployment Environment**: Designed for Replit deployment
+- Expects environment variables to be set in Replit Secrets
+- No database required
+- File system used for state persistence
+- Continuous execution model (infinite loop with sleep)
+
+**Resource Requirements**:
+- Minimal: Simple HTTP requests and text parsing
+- No GPU, heavy compute, or large memory needs
+- Network-bound rather than CPU-bound
