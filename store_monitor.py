@@ -133,13 +133,35 @@ def save_product(store_url, product_url, product_name, in_stock):
         return False
 
 def save_state(state):
-    """Save entire state to database (for compatibility)."""
-    for store_url, products in state.items():
-        for product_url, product_data in products.items():
-            if isinstance(product_data, dict):
-                save_product(store_url, product_url, product_data.get("name"), product_data.get("in_stock", True))
-            else:
-                save_product(store_url, product_url, None, True)
+    """Save entire state to database using batch insert for speed."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        batch = []
+        for store_url, products in state.items():
+            for product_url, product_data in products.items():
+                if isinstance(product_data, dict):
+                    batch.append((store_url, product_url, product_data.get("name"), product_data.get("in_stock", True)))
+                else:
+                    batch.append((store_url, product_url, None, True))
+        
+        if batch:
+            from psycopg2.extras import execute_values
+            execute_values(cur, """
+                INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen)
+                VALUES %s
+                ON CONFLICT (store_url, product_url) 
+                DO UPDATE SET product_name = EXCLUDED.product_name, 
+                              in_stock = EXCLUDED.in_stock,
+                              last_seen = CURRENT_TIMESTAMP
+            """, batch, template="(%s, %s, %s, %s, CURRENT_TIMESTAMP)")
+            conn.commit()
+        
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Error saving state: {e}")
 
 def get_headers_for_url(url):
     mobile_sites = [
