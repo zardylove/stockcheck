@@ -436,6 +436,7 @@ def check_store_page(url, previous_products):
                 })
             else:
                 prev_info = previous_products[product_url]
+                current_products[product_url]["last_alerted"] = prev_info.get("last_alerted")
                 if not prev_info.get("in_stock", False) and product_info["in_stock"]:
                     last_alerted = prev_info.get("last_alerted")
                     if should_alert(last_alerted):
@@ -444,8 +445,6 @@ def check_store_page(url, previous_products):
                             "name": product_info["name"],
                             "url": product_url
                         })
-                    else:
-                        pass
         
         return current_products, changes
         
