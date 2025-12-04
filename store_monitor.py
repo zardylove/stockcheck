@@ -104,7 +104,8 @@ OUT_OF_STOCK_TERMS = [
     "currently unavailable", "temporarily out of stock", "pre-order",
     "coming soon", "not in stock", "no stock available", "stock: 0",
     "notify me when in stock", "out-of-stock", "soldout", "backorder",
-    "back order", "waitlist", "wait list", "notify me", "email when available"
+    "back order", "waitlist", "wait list", "notify me", "email when available",
+    "outofstock", "schema.org/outofstock"
 ]
 
 IN_STOCK_TERMS = [
