@@ -15,6 +15,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 SHOPIFY_STORES_WITH_ANTIBOT = [
     "zingaentertainment.com",
     "themeeplerooms.co.uk",
+    "jetcards.uk",
 ]
 
 def get_db_connection():
