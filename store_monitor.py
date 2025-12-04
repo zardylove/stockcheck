@@ -519,10 +519,13 @@ def main():
                 for change in changes:
                     total_changes += 1
                     if change["type"] == "new":
-                        message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**"
-                        print(f"    🆕 NEW: {change['name'][:50]}")
-                        send_alert(message, change["url"])
-                        mark_alerted(url, change["url"])
+                        if change.get("in_stock", False):
+                            message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**"
+                            print(f"    🆕 NEW: {change['name'][:50]}")
+                            send_alert(message, change["url"])
+                            mark_alerted(url, change["url"])
+                        else:
+                            print(f"    ⏸️ NEW (out of stock, no alert): {change['name'][:50]}")
                     elif change["type"] == "restock":
                         message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
                         print(f"    📦 RESTOCK: {change['name'][:50]}")
