@@ -17,6 +17,7 @@ SHOPIFY_STORES_WITH_ANTIBOT = [
     "themeeplerooms.co.uk",
     "jetcards.uk",
     "rockawaytoys.co.uk",
+    "moon-whale.com",
 ]
 
 def get_db_connection():
