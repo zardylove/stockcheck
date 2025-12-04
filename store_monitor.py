@@ -18,6 +18,7 @@ SHOPIFY_STORES_WITH_ANTIBOT = [
     "jetcards.uk",
     "rockawaytoys.co.uk",
     "moon-whale.com",
+    "redcardgames.com",
 ]
 
 def get_db_connection():
