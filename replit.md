@@ -33,10 +33,18 @@ Preferred communication style: Simple, everyday language.
 - Alerts on new products AND restocks
 
 **URL Files**:
-- `Websites.txt` - Store category pages (58 UK retailers)
+- `Websites.txt` - Store category pages (48 UK retailers)
+- `DirectProducts.txt` - Individual product URLs for direct stock monitoring
 - Legacy: `151bb.txt`, `prisbb.txt`, etc. - Specific product URLs
 
 **Adding New URLs**: Simply edit the text files - one URL per line. The bot will pick them up on the next scan.
+
+## Direct Product Monitoring
+
+For stores that don't have proper category pages (e.g., Saturn Magic uses JavaScript-based search), you can add direct product URLs to `DirectProducts.txt`. The bot will:
+- Check each product page directly for stock status
+- Alert when a product changes from out-of-stock to in-stock
+- Uses different detection priority: "Add to Basket" takes precedence over other text on the page
 
 ## Web Scraping Strategy
 

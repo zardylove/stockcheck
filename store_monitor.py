@@ -443,6 +443,71 @@ def get_timeout_for_url(url):
         return 60
     return 30
 
+def check_direct_product(url, previous_state):
+    """Check a direct product URL for stock status."""
+    try:
+        headers = get_headers_for_url(url)
+        timeout = get_timeout_for_url(url)
+        r = requests.get(url, headers=headers, timeout=timeout)
+        
+        if r.status_code != 200:
+            print(f"⚠️ Failed ({r.status_code})")
+            return previous_state, None
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        page_text = soup.get_text().lower()
+        
+        # Extract product name from page title or h1
+        product_name = None
+        title_tag = soup.find('title')
+        if title_tag:
+            product_name = title_tag.get_text(strip=True)[:100]
+        if not product_name:
+            h1 = soup.find('h1')
+            if h1:
+                product_name = h1.get_text(strip=True)[:100]
+        if not product_name:
+            product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
+        
+        # Check stock status - for direct products, prioritize "Add to Basket" button
+        # because pages often have other products/sections with out-of-stock text
+        has_out_of_stock = any(term in page_text for term in OUT_OF_STOCK_TERMS)
+        has_in_stock = any(term in page_text for term in IN_STOCK_TERMS)
+        
+        # For direct products: if "add to basket/cart" is found, it's in stock
+        # This takes priority over other out-of-stock text that might be on the page
+        if has_in_stock:
+            is_in_stock = True
+        elif has_out_of_stock:
+            is_in_stock = False
+        else:
+            is_in_stock = True  # Assume in stock if unclear
+        
+        current_state = {
+            "name": product_name,
+            "in_stock": is_in_stock,
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+        }
+        
+        # Detect restock (was out of stock, now in stock)
+        change = None
+        if previous_state:
+            was_in_stock = previous_state.get("in_stock", False)
+            if not was_in_stock and is_in_stock:
+                last_alerted = previous_state.get("last_alerted")
+                if should_alert(last_alerted):
+                    change = {
+                        "type": "restock",
+                        "name": product_name,
+                        "url": url
+                    }
+        
+        return current_state, change
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return previous_state, None
+
 def check_store_page(url, previous_products):
     try:
         headers = get_headers_for_url(url)
@@ -518,10 +583,15 @@ def main():
         print("No URLs to check. Add URLs to Websites.txt")
         return
     
+    direct_urls = load_urls("DirectProducts.txt")
+    
     print(f"Found {len(urls)} store pages to monitor")
+    if direct_urls:
+        print(f"Found {len(direct_urls)} direct products to monitor")
     print(f"Check interval: {CHECK_INTERVAL} seconds\n")
     
     state = load_state()
+    direct_state = {}  # Track direct product states
     first_run = len(state) == 0
     
     if first_run:
@@ -563,6 +633,39 @@ def main():
                 print(f"OK ({len(current_products)} products)")
             
             time.sleep(random.uniform(2, 4))
+        
+        # Check direct product URLs
+        if direct_urls:
+            print(f"\n🎯 Checking {len(direct_urls)} direct products...")
+            for url in direct_urls:
+                store_name = urlparse(url).netloc
+                print(f"  Checking: {store_name}...", end=" ")
+                
+                prev_state = direct_state.get(url)
+                current_state, change = check_direct_product(url, prev_state)
+                
+                if current_state:
+                    direct_state[url] = current_state
+                    stock_status = "IN STOCK" if current_state.get("in_stock") else "OUT OF STOCK"
+                    
+                    if change and not first_run:
+                        total_changes += 1
+                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
+                        print(f"🔔 RESTOCK!")
+                        send_alert(message, change["url"])
+                        # Update last_alerted in direct_state
+                        from datetime import datetime
+                        direct_state[url]["last_alerted"] = datetime.now()
+                        # Also save to database
+                        save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
+                        mark_alerted(url, url)
+                    else:
+                        print(f"{stock_status}")
+                    
+                    # Save state to database
+                    save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
+                
+                time.sleep(random.uniform(2, 4))
         
         save_state(state)
         
