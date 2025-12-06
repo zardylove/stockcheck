@@ -7,10 +7,32 @@ import json
 import re
 import psycopg2
 from urllib.parse import urljoin, urlparse, urlunparse
+from datetime import datetime, timedelta
 
 DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# === OPTIMIZATION: Reusable session for connection pooling ===
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+})
+
+# === OPTIMIZATION: Failed site cache (skip for 3 minutes) ===
+FAILED_SITES = {}  # {url: failure_time}
+FAILURE_COOLDOWN_MINUTES = 3
+
+# === OPTIMIZATION: JS/Dynamic page skip cache ===
+JS_SKIP_CACHE = {}  # {url: skip_until_time}
+JS_SKIP_MINUTES = 5
+
+# URL patterns that indicate JavaScript-only pages
+JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
+
+# HTML content that indicates JS-only rendering
+JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder', 
+                       'please enable javascript', 'browser does not support']
 
 SHOPIFY_STORES_WITH_ANTIBOT = [
     "zingaentertainment.com",
@@ -99,16 +121,16 @@ MOBILE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
 }
 
-OUT_OF_STOCK_TERMS = [
+OUT_OF_STOCK_TERMS = frozenset([
     "out of stock", "sold out", "unavailable", "notify when available",
     "currently unavailable", "temporarily out of stock", "pre-order",
     "coming soon", "not in stock", "no stock available", "stock: 0",
     "notify me when in stock", "out-of-stock", "soldout", "backorder",
     "back order", "waitlist", "wait list", "notify me", "email when available",
     "outofstock", "schema.org/outofstock", "check back soon", "sold-out-btn"
-]
+])
 
-IN_STOCK_TERMS = [
+IN_STOCK_TERMS = frozenset([
     "add to cart", "add to basket", "add to bag", "add to trolley",
     "add to order", "in stock", "available", "available now",
     "available to buy", "buy now", "order now", "item in stock",
@@ -117,7 +139,49 @@ IN_STOCK_TERMS = [
     "shop now", "get it now", "ready to ship", "ships today",
     "in stock now", "hurry", "only a few left", "low stock",
     "limited stock", "few remaining"
-]
+])
+
+# === OPTIMIZATION: Precompiled regex for stock term matching ===
+OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
+IN_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TERMS), re.IGNORECASE)
+
+def is_site_in_failure_cooldown(url):
+    """Check if a site is in failure cooldown (failed recently)."""
+    if url not in FAILED_SITES:
+        return False
+    failure_time = FAILED_SITES[url]
+    if datetime.now() - failure_time < timedelta(minutes=FAILURE_COOLDOWN_MINUTES):
+        return True
+    del FAILED_SITES[url]
+    return False
+
+def mark_site_failed(url):
+    """Mark a site as failed (will be skipped for cooldown period)."""
+    FAILED_SITES[url] = datetime.now()
+
+def is_js_only_url(url):
+    """Check if URL pattern indicates JavaScript-only page."""
+    return any(pattern in url.lower() for pattern in JS_URL_PATTERNS)
+
+def is_js_only_page(html_content, product_count):
+    """Check if page content indicates JavaScript-only rendering."""
+    if len(html_content) < 2000 and product_count < 3:
+        return True
+    html_lower = html_content.lower()
+    return any(indicator in html_lower for indicator in JS_PAGE_INDICATORS)
+
+def is_in_js_skip_cache(url):
+    """Check if URL is in JS skip cache."""
+    if url not in JS_SKIP_CACHE:
+        return False
+    if datetime.now() < JS_SKIP_CACHE[url]:
+        return True
+    del JS_SKIP_CACHE[url]
+    return False
+
+def add_to_js_skip_cache(url):
+    """Add URL to JS skip cache."""
+    JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
 
 def load_urls(file_path="Websites.txt"):
     try:
@@ -192,10 +256,9 @@ def mark_alerted(store_url, product_url):
         print(f"⚠️ Error marking alerted: {e}")
 
 def should_alert(last_alerted):
-    """Check if enough time has passed since last alert (24 hour cooldown)."""
+    """Check if enough time has passed since last alert (8 hour cooldown)."""
     if last_alerted is None:
         return True
-    from datetime import datetime, timedelta
     now = datetime.now()
     cooldown = timedelta(hours=ALERT_COOLDOWN_HOURS)
     return (now - last_alerted) > cooldown
@@ -366,8 +429,9 @@ def extract_products(soup, base_url):
         
         card_text = get_product_card_text(link)
         
-        has_out_of_stock = any(term in card_text for term in OUT_OF_STOCK_TERMS)
-        has_in_stock = any(term in card_text for term in IN_STOCK_TERMS)
+        # Use precompiled regex patterns for faster matching
+        has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(card_text))
+        has_in_stock = bool(IN_STOCK_PATTERN.search(card_text))
         
         if has_out_of_stock:
             is_in_stock = False
@@ -438,20 +502,30 @@ def is_product_url(url, base_url):
     return False
 
 def get_timeout_for_url(url):
+    """Get timeout for URL - reduced from 30 to 15 seconds, with slow site allowlist."""
     slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
     if any(site in url for site in slow_sites):
-        return 60
-    return 30
+        return 30  # Reduced from 60
+    return 15  # Reduced from 30
 
-def check_direct_product(url, previous_state):
+def check_direct_product(url, previous_state, stats):
     """Check a direct product URL for stock status."""
+    # Check failure cooldown
+    if is_site_in_failure_cooldown(url):
+        print(f"⏭️ SKIPPED (failed recently)")
+        stats['skipped'] += 1
+        return previous_state, None
+    
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
-        r = requests.get(url, headers=headers, timeout=timeout)
+        r = SESSION.get(url, headers=headers, timeout=timeout)
+        stats['fetched'] += 1
         
         if r.status_code != 200:
             print(f"⚠️ Failed ({r.status_code})")
+            mark_site_failed(url)
+            stats['failed'] += 1
             return previous_state, None
         
         soup = BeautifulSoup(r.text, "html.parser")
@@ -469,10 +543,9 @@ def check_direct_product(url, previous_state):
         if not product_name:
             product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
         
-        # Check stock status - for direct products, prioritize "Add to Basket" button
-        # because pages often have other products/sections with out-of-stock text
-        has_out_of_stock = any(term in page_text for term in OUT_OF_STOCK_TERMS)
-        has_in_stock = any(term in page_text for term in IN_STOCK_TERMS)
+        # Check stock status using precompiled regex patterns
+        has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(page_text))
+        has_in_stock = bool(IN_STOCK_PATTERN.search(page_text))
         
         # For direct products: if "add to basket/cart" is found, it's in stock
         # This takes priority over other out-of-stock text that might be on the page
@@ -504,18 +577,46 @@ def check_direct_product(url, previous_state):
         
         return current_state, change
         
+    except requests.exceptions.Timeout:
+        print(f"⏱️ TIMEOUT")
+        mark_site_failed(url)
+        stats['failed'] += 1
+        return previous_state, None
     except Exception as e:
         print(f"❌ Error: {e}")
+        mark_site_failed(url)
+        stats['failed'] += 1
         return previous_state, None
 
-def check_store_page(url, previous_products):
+def check_store_page(url, previous_products, stats):
+    # Check JS URL pattern skip
+    if is_js_only_url(url):
+        print(f"⏭️ SKIPPED (JS-only URL pattern)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
+    # Check JS skip cache
+    if is_in_js_skip_cache(url):
+        print(f"⏭️ SKIPPED (JS page, cached)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
+    # Check failure cooldown
+    if is_site_in_failure_cooldown(url):
+        print(f"⏭️ SKIPPED (failed recently)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
-        r = requests.get(url, headers=headers, timeout=timeout)
+        r = SESSION.get(url, headers=headers, timeout=timeout)
+        stats['fetched'] += 1
         
         if r.status_code != 200:
-            print(f"⚠️ Failed to fetch {url} (status {r.status_code})")
+            print(f"⚠️ Failed (status {r.status_code})")
+            mark_site_failed(url)
+            stats['failed'] += 1
             return previous_products, []
         
         soup = BeautifulSoup(r.text, "html.parser")
@@ -523,6 +624,13 @@ def check_store_page(url, previous_products):
         
         prev_count = len(previous_products)
         curr_count = len(current_products)
+        
+        # Check if this is a JS-only page (empty response)
+        if is_js_only_page(r.text, curr_count) and prev_count == 0:
+            print(f"⏭️ JS-ONLY PAGE (adding to skip cache)")
+            add_to_js_skip_cache(url)
+            stats['skipped'] += 1
+            return previous_products, []
         
         is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
         
@@ -565,8 +673,15 @@ def check_store_page(url, previous_products):
         
         return current_products, changes
         
+    except requests.exceptions.Timeout:
+        print(f"⏱️ TIMEOUT")
+        mark_site_failed(url)
+        stats['failed'] += 1
+        return previous_products, []
     except Exception as e:
-        print(f"❌ Error checking {url}: {e}")
+        print(f"❌ Error: {e}")
+        mark_site_failed(url)
+        stats['failed'] += 1
         return previous_products, []
 
 def main():
@@ -599,6 +714,10 @@ def main():
         print("   (No alerts will be sent on first run)\n")
     
     while True:
+        # === OPTIMIZATION: Cycle stats tracking ===
+        stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
+        cycle_start = time.time()
+        
         print(f"🔍 Scanning {len(urls)} store pages...")
         total_changes = 0
         
@@ -607,7 +726,7 @@ def main():
             print(f"  Checking: {store_name}...", end=" ")
             
             prev_products = state.get(url, {})
-            current_products, changes = check_store_page(url, prev_products)
+            current_products, changes = check_store_page(url, prev_products, stats)
             
             state[url] = current_products
             
@@ -642,7 +761,7 @@ def main():
                 print(f"  Checking: {store_name}...", end=" ")
                 
                 prev_state = direct_state.get(url)
-                current_state, change = check_direct_product(url, prev_state)
+                current_state, change = check_direct_product(url, prev_state, stats)
                 
                 if current_state:
                     direct_state[url] = current_state
@@ -654,7 +773,6 @@ def main():
                         print(f"🔔 RESTOCK!")
                         send_alert(message, change["url"])
                         # Update last_alerted in direct_state
-                        from datetime import datetime
                         direct_state[url]["last_alerted"] = datetime.now()
                         # Also save to database
                         save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
@@ -669,6 +787,9 @@ def main():
         
         save_state(state)
         
+        # === OPTIMIZATION: Cycle stats summary ===
+        cycle_time = round(time.time() - cycle_start, 1)
+        
         if first_run:
             total_products = sum(len(products) for products in state.values())
             print(f"\n✅ Initial scan complete! Tracking {total_products} products across {len(urls)} stores")
@@ -679,6 +800,13 @@ def main():
                 print(f"\n📊 Scan complete. {total_changes} changes detected and alerted.")
             else:
                 print(f"\n📊 Scan complete. No changes detected.")
+        
+        # Print cycle stats
+        print(f"📈 Stats: {stats['fetched']} fetched, {stats['skipped']} skipped, {stats['failed']} failed | Cycle: {cycle_time}s")
+        if FAILED_SITES:
+            print(f"   ⏸️ {len(FAILED_SITES)} sites in failure cooldown")
+        if JS_SKIP_CACHE:
+            print(f"   🚫 {len(JS_SKIP_CACHE)} JS-only pages in skip cache")
         
         print(f"⏱️ Next scan in {CHECK_INTERVAL} seconds...\n")
         time.sleep(CHECK_INTERVAL)
