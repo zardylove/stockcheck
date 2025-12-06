@@ -4,7 +4,7 @@ This is a Python-based stock monitoring system that tracks Pokemon Trading Card 
 
 ## Main Bot: store_monitor.py
 
-The primary bot (`store_monitor.py`) monitors 49 UK Pokemon TCG store pages from `Websites.txt`:
+The primary bot (`store_monitor.py`) monitors 59 UK Pokemon TCG store pages from `Websites.txt`:
 - Detects **new products** added to store pages
 - Detects **restocks** (products changing from out-of-stock to in-stock)
 - Sends Discord alerts via the `STOCK` webhook
@@ -12,6 +12,14 @@ The primary bot (`store_monitor.py`) monitors 49 UK Pokemon TCG store pages from
 - Runs continuously with no delay between scan cycles
 - Development mode: Console logging only, no Discord pings
 - Production mode (deployed): Sends Discord alerts
+
+### Performance Optimizations (Dec 2024)
+- **Session reuse**: Single `requests.Session()` for connection pooling
+- **Request timeout**: 15 seconds (30s for slow sites)
+- **Failed site cache**: Skip sites for 3 minutes after failure
+- **JS page detection**: Skip JavaScript-only pages for 5 minutes
+- **Precompiled regex**: Stock term matching uses compiled patterns
+- **Cycle stats**: Logs fetched/skipped/failed counts and cycle time
 
 ## Deployment
 
