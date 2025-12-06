@@ -35,7 +35,7 @@ https://safarizone.co.uk/collections/pokemon-english
 https://www.sweetsnthings.co.uk/collections/pokemon?sort_by=created-descending
 https://www.tabletoprepublic.com/pokemon
 https://thirstymeeples.co.uk/collections/pokemon-tcg-1
-https://thistletavern.com/collections/pokemon
+https://thistletavern.com/collections/pokemon?sort_by=created-descending&filter.v.price.gte=&filter.v.price.lte=&filter.v.availability=1
 https://titancards.co.uk/collections/pokemon-sealed-products?sort_by=created-descending
 https://www.tofs.com/search?q=pokemon+tcg&options%5Bprefix%5D=last&type=product
 https://www.toybarnhaus.co.uk/collections/pokemon
@@ -46,3 +46,14 @@ https://www.westendgames.co.uk/collections/pokemon
 https://www.wonderlandmodels.com/brands/pokemon/
 https://www.zavvi.com/franchises/pokemon/pokemon-cards.list
 https://zingaentertainment.com/collections/pokemon
+https://cardsoftheshire.com/collections/sealed-pokemon?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
+https://grandlinecollectiblesltd.com/collections/pokemon-sealed-products?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
+https://thetcgvilla.co.uk/
+https://gamersathart.co.uk/?s=pokemon+tcg
+https://www.leodisgames.com/search?q=pokemon+tcg&options%5Bprefix%5D=last
+https://collect.thegamecollection.net/collections/pokemon?sort_by=created-descending&filter.v.availability=1
+https://thegrumpygoblin.co.uk/collections/pokemon-preorders
+https://fabledcards.co.uk/collections/english-1
+https://njcardsuk.com/collections/pokemon?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
+https://viridianvault.co.uk/collections/pre-orders
+https://inspirenewquay.uk/collections/pokemon?filter.v.availability=1&sort_by=best-selling&page=1
