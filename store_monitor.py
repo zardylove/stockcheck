@@ -263,7 +263,7 @@ def should_alert(last_alerted):
     cooldown = timedelta(hours=ALERT_COOLDOWN_HOURS)
     return (now - last_alerted) > cooldown
 
-def get_last_alerted_from_db(product_url):
+def get_last_alerted_from_db(store_url, product_url):
     """Check database for last_alerted timestamp of a product (for anti-flicker)."""
     if not DATABASE_URL:
         return None
@@ -272,9 +272,9 @@ def get_last_alerted_from_db(product_url):
         cur = conn.cursor()
         cur.execute("""
             SELECT last_alerted FROM product_state 
-            WHERE product_url = %s AND last_alerted IS NOT NULL
+            WHERE store_url = %s AND product_url = %s AND last_alerted IS NOT NULL
             LIMIT 1
-        """, (product_url,))
+        """, (store_url, product_url))
         row = cur.fetchone()
         cur.close()
         conn.close()
@@ -648,7 +648,7 @@ def check_store_page(url, previous_products, stats):
             if product_url not in previous_products:
                 # Check if this product was seen before in the database (returning product)
                 # This prevents spam when products flicker due to anti-bot
-                db_last_alerted = get_last_alerted_from_db(product_url)
+                db_last_alerted = get_last_alerted_from_db(url, product_url)
                 if db_last_alerted and not should_alert(db_last_alerted):
                     # Product was alerted recently, skip (anti-flicker protection)
                     current_products[product_url]["last_alerted"] = db_last_alerted
