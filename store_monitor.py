@@ -733,7 +733,7 @@ def main():
         print("No URLs to check. Add URLs to Websites.txt")
         return
     
-    direct_urls = load_urls("DirectProducts.txt")
+    direct_urls = [normalize_product_url(u) for u in load_urls("DirectProducts.txt") if normalize_product_url(u)]
     
     print(f"Found {len(urls)} store pages to monitor")
     if direct_urls:
@@ -764,6 +764,7 @@ def main():
             silence_alerts = should_silence_first_run(url)
             if silence_alerts:
                 mark_url_initialized(url)
+                print(f"🆕 First scan, alerts silenced")
             
             prev_products = state.get(url, {})
             current_products, changes = check_store_page(url, prev_products, stats)
@@ -811,6 +812,10 @@ def main():
                 silence_alerts = should_silence_first_run(url)
                 if silence_alerts:
                     mark_url_initialized(url)
+                    # Set last_alerted to prevent flicker on first scan
+                    direct_state[url] = {"name": "", "in_stock": True, "last_alerted": datetime.now()}
+                    print(f"🆕 First scan, alerts silenced")
+                    continue
                 
                 prev_state = direct_state.get(url)
                 current_state, change = check_direct_product(url, prev_state, stats)
@@ -826,14 +831,16 @@ def main():
                         send_alert(message, change["url"])
                         # Update last_alerted in direct_state
                         direct_state[url]["last_alerted"] = datetime.now()
-                        # Also save to database
+                        # Save to database on alert
                         save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
                         mark_alerted(url, url)
                     else:
                         print(f"{stock_status}")
                     
-                    # Save state to database
-                    save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
+                    # Save to DB only if stock changed
+                    prev_in_stock = prev_state.get("in_stock") if prev_state else None
+                    if current_state.get("in_stock") != prev_in_stock:
+                        save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
                 
                 time.sleep(random.uniform(2, 4))
         
