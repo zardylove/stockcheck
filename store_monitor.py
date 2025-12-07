@@ -760,11 +760,13 @@ def main():
             store_name = urlparse(url).netloc
             print(f"  Checking: {store_name}...", end=" ")
             
-            # Silent first scan for new URLs
+            # Silent first scan for new URLs - skip entirely to prevent restart issues
             silence_alerts = should_silence_first_run(url)
             if silence_alerts:
                 mark_url_initialized(url)
-                print(f"🆕 First scan, alerts silenced")
+                print(f"🆕 First scan, will scan next cycle")
+                time.sleep(random.uniform(1, 2))
+                continue
             
             prev_products = state.get(url, {})
             current_products, changes = check_store_page(url, prev_products, stats)
