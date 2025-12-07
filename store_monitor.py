@@ -582,12 +582,12 @@ def check_direct_product(url, previous_state, stats):
         has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(page_text))
         has_in_stock = bool(IN_STOCK_PATTERN.search(page_text))
         
-        # For direct products: if "add to basket/cart" is found, it's in stock
-        # This takes priority over other out-of-stock text that might be on the page
-        if has_in_stock:
-            is_in_stock = True
-        elif has_out_of_stock:
+        # For direct products: prioritize out-of-stock terms
+        # Pages often have "Add to cart" in JS templates even when sold out
+        if has_out_of_stock:
             is_in_stock = False
+        elif has_in_stock:
+            is_in_stock = True
         else:
             is_in_stock = True  # Assume in stock if unclear
         

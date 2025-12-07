@@ -57,3 +57,8 @@ https://fabledcards.co.uk/collections/english-1
 https://njcardsuk.com/collections/pokemon?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
 https://viridianvault.co.uk/collections/pre-orders
 https://inspirenewquay.uk/collections/pokemon?filter.v.availability=1&sort_by=best-selling&page=1
+https://mythicgoblin.com/product-category/tcgs/pokemon/
+https://www.toploaded.co.uk/pok%C3%A8mon
+https://pokenazcards.co.uk/search?type=product&q=pokemon
+https://bestcollectables.co.uk/collections/pokemon-1
+https://wigwamtoys.co.uk/collections/pokeman-trading-card-games
