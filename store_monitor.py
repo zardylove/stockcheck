@@ -547,15 +547,12 @@ def check_direct_product(url, previous_state, stats):
         has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(page_text))
         has_in_stock = bool(IN_STOCK_PATTERN.search(page_text))
         
-        # Stock detection priority:
-        # - If BOTH in-stock AND out-of-stock terms found → out of stock (pre-orders have "add to cart" + "pre-order")
-        # - If only out-of-stock terms → out of stock
-        # - If only in-stock terms → in stock
-        # - If neither → assume in stock
-        if has_out_of_stock:
-            is_in_stock = False
-        elif has_in_stock:
+        # For direct products: if "add to basket/cart" is found, it's in stock
+        # This takes priority over other out-of-stock text that might be on the page
+        if has_in_stock:
             is_in_stock = True
+        elif has_out_of_stock:
+            is_in_stock = False
         else:
             is_in_stock = True  # Assume in stock if unclear
         
@@ -743,6 +740,9 @@ def main():
                             print(f"    🆕 NEW: {change['name'][:50]}")
                             send_alert(message, change["url"])
                             mark_alerted(url, change["url"])
+                            # Update in-memory state to prevent duplicate alerts
+                            if change["url"] in state[url]:
+                                state[url][change["url"]]["last_alerted"] = datetime.now()
                         else:
                             print(f"    ⏸️ NEW (out of stock, no alert): {change['name'][:50]}")
                     elif change["type"] == "restock":
@@ -750,6 +750,10 @@ def main():
                         print(f"    📦 RESTOCK: {change['name'][:50]}")
                         send_alert(message, change["url"])
                         mark_alerted(url, change["url"])
+                        # Update in-memory state to prevent duplicate alerts
+                        if change["url"] in state[url]:
+                            state[url][change["url"]]["last_alerted"] = datetime.now()
+                            state[url][change["url"]]["in_stock"] = True
                     time.sleep(1)
             else:
                 print(f"OK ({len(current_products)} products)")
