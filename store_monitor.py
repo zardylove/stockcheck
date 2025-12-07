@@ -282,6 +282,41 @@ def get_last_alerted_from_db(store_url, product_url):
     except Exception as e:
         return None
 
+def is_url_initialized(store_url):
+    """Check if a store or direct product has been seen before."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 1 FROM product_state WHERE store_url = %s LIMIT 1
+        """, (store_url,))
+        exists = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return exists
+    except:
+        return False
+
+def mark_url_initialized(store_url):
+    """Mark a store/direct URL as initialized without alerting."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO product_state (store_url, product_url, product_name, in_stock)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, (store_url, store_url, "__init__", False))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except:
+        pass
+
+def should_silence_first_run(store_url):
+    """Return True if this URL has never been scanned before."""
+    return not is_url_initialized(store_url)
+
 def save_state(state):
     """Save entire state to database using batch insert for speed."""
     try:
@@ -706,7 +741,7 @@ def main():
     print(f"Check interval: {CHECK_INTERVAL} seconds\n")
     
     state = load_state()
-    direct_state = {}  # Track direct product states
+    direct_state = load_state()  # Database-backed direct product states
     first_run = len(state) == 0
     
     if first_run:
@@ -725,12 +760,17 @@ def main():
             store_name = urlparse(url).netloc
             print(f"  Checking: {store_name}...", end=" ")
             
+            # Silent first scan for new URLs
+            silence_alerts = should_silence_first_run(url)
+            if silence_alerts:
+                mark_url_initialized(url)
+            
             prev_products = state.get(url, {})
             current_products, changes = check_store_page(url, prev_products, stats)
             
             state[url] = current_products
             
-            if changes and not first_run:
+            if changes and not first_run and not silence_alerts:
                 print(f"Found {len(changes)} changes!")
                 for change in changes:
                     total_changes += 1
@@ -767,6 +807,11 @@ def main():
                 store_name = urlparse(url).netloc
                 print(f"  Checking: {store_name}...", end=" ")
                 
+                # Silent first scan for new direct product URLs
+                silence_alerts = should_silence_first_run(url)
+                if silence_alerts:
+                    mark_url_initialized(url)
+                
                 prev_state = direct_state.get(url)
                 current_state, change = check_direct_product(url, prev_state, stats)
                 
@@ -774,7 +819,7 @@ def main():
                     direct_state[url] = current_state
                     stock_status = "IN STOCK" if current_state.get("in_stock") else "OUT OF STOCK"
                     
-                    if change and not first_run:
+                    if change and not first_run and not silence_alerts:
                         total_changes += 1
                         message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
                         print(f"🔔 RESTOCK!")
