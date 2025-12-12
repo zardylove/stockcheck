@@ -359,10 +359,6 @@ def get_headers_for_url(url):
     return HEADERS
 
 def send_alert(message, url):
-    if not IS_PRODUCTION:
-        print(f"📋 [DEV MODE - no Discord ping]")
-        return
-    
     if not DISCORD_WEBHOOK:
         print("Warning: STOCK webhook not configured")
         return
