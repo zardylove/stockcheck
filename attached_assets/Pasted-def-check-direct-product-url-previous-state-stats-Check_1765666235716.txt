@@ -1,0 +1,63 @@
+def check_direct_product(url, previous_state, stats):
+    """
+    Check the direct product page for authoritative stock status.
+    Preorders and in-stock items trigger alerts.
+    """
+    if is_site_in_failure_cooldown(url):
+        print(f"⏭️ SKIPPED (failed recently)")
+        stats['skipped'] += 1
+        return previous_state, None
+
+    try:
+        headers = get_headers_for_url(url)
+        timeout = get_timeout_for_url(url)
+        r = SESSION.get(url, headers=headers, timeout=timeout)
+        stats['fetched'] += 1
+
+        if r.status_code != 200:
+            mark_site_failed(url)
+            stats['failed'] += 1
+            return previous_state, None
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        page_text = soup.get_text().lower()
+
+        product_name = (
+            (soup.find('title').get_text(strip=True) if soup.find('title') else None)
+            or (soup.find('h1').get_text(strip=True) if soup.find('h1') else None)
+            or urlparse(url).path.split('/')[-1].replace('-', ' ')[:100]
+        )
+
+        stock_state = classify_stock(page_text)
+        if stock_state == "out":
+            is_in_stock = False
+        else:
+            is_in_stock = True  # preorders and confirmed in-stock
+
+        current_state = {
+            "name": product_name,
+            "in_stock": is_in_stock,
+            "stock_state": stock_state,
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+        }
+
+        change = None
+        if previous_state:
+            was_in_stock = previous_state.get("in_stock", False)
+            if not was_in_stock and is_in_stock:
+                last_alerted = previous_state.get("last_alerted")
+                if should_alert(last_alerted):
+                    alert_type = "PREORDER" if stock_state == "preorder" else "restock"
+                    change = {
+                        "type": alert_type,
+                        "name": product_name,
+                        "url": url
+                    }
+
+        return current_state, change
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        mark_site_failed(url)
+        stats['failed'] += 1
+        return previous_state, None

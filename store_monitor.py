@@ -121,29 +121,61 @@ MOBILE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
 }
 
-OUT_OF_STOCK_TERMS = frozenset([
-    "out of stock", "sold out", "unavailable", "notify when available",
-    "currently unavailable", "temporarily out of stock", "pre-order",
-    "coming soon", "not in stock", "no stock available", "stock: 0",
-    "notify me when in stock", "out-of-stock", "soldout", "backorder",
-    "back order", "waitlist", "wait list", "notify me", "email when available",
-    "outofstock", "schema.org/outofstock", "check back soon", "sold-out-btn"
-])
+# === STOCK CLASSIFICATION TERMS ===
+PREORDER_TERMS = [
+    "pre-order", "preorder", "pre order", "expected",
+    "releasing", "available from", "releases on", "preorder now",
+    "pre-order now", "coming", "presale", "pre-sale"
+]
 
-IN_STOCK_TERMS = frozenset([
+OUT_OF_STOCK_TERMS = [
+    "sold out", "out of stock", "unavailable", "notify when available",
+    "currently unavailable", "temporarily out of stock", "not in stock",
+    "no stock available", "stock: 0", "notify me when in stock", "out-of-stock",
+    "soldout", "backorder", "back order", "waitlist", "wait list",
+    "notify me", "email when available", "outofstock", "schema.org/outofstock",
+    "check back soon", "sold-out-btn", "notify me when", "register interest"
+]
+
+IN_STOCK_TERMS = [
     "add to cart", "add to basket", "add to bag", "add to trolley",
-    "add to order", "in stock", "available", "available now",
-    "available to buy", "buy now", "order now", "item in stock",
-    "stock available", "stock: available", "instock", "in-stock",
-    "add to shopping bag", "add to shopping cart", "purchase now",
-    "shop now", "get it now", "ready to ship", "ships today",
-    "in stock now", "hurry", "only a few left", "low stock",
-    "limited stock", "few remaining"
-])
+    "add to order", "in stock", "available now", "available to buy",
+    "buy now", "order now", "item in stock", "stock available",
+    "stock: available", "instock", "in-stock", "add to shopping bag",
+    "add to shopping cart", "purchase now", "shop now", "get it now",
+    "ready to ship", "ships today", "in stock now", "hurry",
+    "only a few left", "low stock", "limited stock", "few remaining"
+]
 
 # === OPTIMIZATION: Precompiled regex for stock term matching ===
+PREORDER_PATTERN = re.compile('|'.join(re.escape(term) for term in PREORDER_TERMS), re.IGNORECASE)
 OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
 IN_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TERMS), re.IGNORECASE)
+
+def classify_stock(text):
+    """
+    Classify stock status from page text.
+    Returns: 'preorder', 'out', 'in', or 'unknown'
+    
+    Priority: preorder > out > in > unknown
+    """
+    text_lower = text.lower()
+    
+    # Check preorder first (these are valuable alerts)
+    if PREORDER_PATTERN.search(text_lower):
+        # Make sure it's not also marked as sold out
+        if not OUT_OF_STOCK_PATTERN.search(text_lower):
+            return "preorder"
+    
+    # Check out of stock
+    if OUT_OF_STOCK_PATTERN.search(text_lower):
+        return "out"
+    
+    # Check in stock
+    if IN_STOCK_PATTERN.search(text_lower):
+        return "in"
+    
+    return "unknown"
 
 def is_site_in_failure_cooldown(url):
     """Check if a site is in failure cooldown (failed recently)."""
@@ -374,6 +406,42 @@ def send_alert(message, url):
             print(f"⚠️ Failed to send alert ({r.status_code})")
     except Exception as e:
         print(f"❌ Discord error: {e}")
+
+def confirm_product_stock(product_url):
+    """
+    Fetch the actual product page to confirm stock status.
+    Returns: ('in', 'preorder', 'out', 'unknown') and product name
+    
+    This eliminates false positives from category page detection.
+    """
+    try:
+        headers = get_headers_for_url(product_url)
+        timeout = get_timeout_for_url(product_url)
+        r = SESSION.get(product_url, headers=headers, timeout=timeout)
+        
+        if r.status_code != 200:
+            return "unknown", None
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        page_text = soup.get_text()
+        
+        # Extract product name
+        product_name = None
+        title_tag = soup.find('title')
+        if title_tag:
+            product_name = title_tag.get_text(strip=True)[:100]
+        if not product_name:
+            h1 = soup.find('h1')
+            if h1:
+                product_name = h1.get_text(strip=True)[:100]
+        
+        # Classify stock status from product page
+        stock_status = classify_stock(page_text)
+        
+        return stock_status, product_name
+        
+    except Exception as e:
+        return "unknown", None
 
 def get_product_card_text(link):
     card_text = ""
