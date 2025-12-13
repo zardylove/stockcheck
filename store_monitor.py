@@ -163,9 +163,7 @@ def classify_stock(text):
     
     # Check preorder first (these are valuable alerts)
     if PREORDER_PATTERN.search(text_lower):
-        # Make sure it's not also marked as sold out
-        if not OUT_OF_STOCK_PATTERN.search(text_lower):
-            return "preorder"
+        return "preorder"
     
     # Check out of stock
     if OUT_OF_STOCK_PATTERN.search(text_lower):
@@ -492,13 +490,16 @@ def find_product_container(soup):
     return None
 
 def extract_products(soup, base_url):
+    """
+    Extract products from a category page.
+    Category scan is for discovery only: we classify stock but DO NOT send alerts here.
+    Only preorders are marked as in_stock=True on category pages.
+    All other states require product page confirmation.
+    """
     products = {}
     
     container = find_product_container(soup)
-    if container:
-        product_links = container.find_all('a', href=True)
-    else:
-        product_links = soup.find_all('a', href=True)
+    product_links = container.find_all('a', href=True) if container else soup.find_all('a', href=True)
     
     for link in product_links:
         href = link.get('href', '')
@@ -507,11 +508,14 @@ def extract_products(soup, base_url):
         if not is_product_url(full_url, base_url):
             continue
         
+        # Extract product name from various sources
         product_name = ""
-        
         img = link.find('img')
         if img:
             product_name = img.get('alt', '') or img.get('title', '')
+        
+        if not product_name:
+            product_name = link.get('title', '')
         
         if not product_name:
             title_elem = link.find(['h2', 'h3', 'h4', 'span', 'p'])
@@ -528,22 +532,25 @@ def extract_products(soup, base_url):
         
         card_text = get_product_card_text(link)
         
-        # Use precompiled regex patterns for faster matching
-        has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(card_text))
-        has_in_stock = bool(IN_STOCK_PATTERN.search(card_text))
+        # Classify stock conservatively on category page
+        category_state = classify_stock(card_text)
         
-        if has_out_of_stock:
-            is_in_stock = False
-        elif has_in_stock:
-            is_in_stock = True
+        # CONSERVATIVE APPROACH:
+        # - "in" on category page is UNCERTAIN (could be JS template text) → mark False
+        # - "preorder" is reliable → mark True (always alert)
+        # - "out" is reliable → mark False
+        # - "unknown" → mark False
+        if category_state == "preorder":
+            is_in_stock = True  # Preorders always tracked as available
         else:
-            is_in_stock = True
+            is_in_stock = False  # Everything else requires product page confirmation
         
         normalized_url = normalize_product_url(full_url)
         if normalized_url and normalized_url not in products:
             products[normalized_url] = {
                 "name": product_name,
-                "in_stock": is_in_stock
+                "in_stock": is_in_stock,
+                "category_state": category_state  # Store category classification for reference
             }
     
     return products
