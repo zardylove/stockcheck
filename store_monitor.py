@@ -608,7 +608,7 @@ def get_timeout_for_url(url):
     return 15  # Reduced from 30
 
 def check_direct_product(url, previous_state, stats):
-    """Check a direct product URL for stock status."""
+    """Check a direct product URL for stock status using classify_stock."""
     # Check failure cooldown
     if is_site_in_failure_cooldown(url):
         print(f"⏭️ SKIPPED (failed recently)")
@@ -628,7 +628,7 @@ def check_direct_product(url, previous_state, stats):
             return previous_state, None
         
         soup = BeautifulSoup(r.text, "html.parser")
-        page_text = soup.get_text().lower()
+        page_text = soup.get_text()
         
         # Extract product name from page title or h1
         product_name = None
@@ -642,34 +642,32 @@ def check_direct_product(url, previous_state, stats):
         if not product_name:
             product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
         
-        # Check stock status using precompiled regex patterns
-        has_out_of_stock = bool(OUT_OF_STOCK_PATTERN.search(page_text))
-        has_in_stock = bool(IN_STOCK_PATTERN.search(page_text))
+        # Use classify_stock for consistent detection
+        stock_status = classify_stock(page_text)
         
-        # For direct products: prioritize out-of-stock terms
-        # Pages often have "Add to cart" in JS templates even when sold out
-        if has_out_of_stock:
-            is_in_stock = False
-        elif has_in_stock:
-            is_in_stock = True
-        else:
-            is_in_stock = True  # Assume in stock if unclear
+        # Map stock_status to in_stock boolean (for DB compatibility)
+        # 'in' or 'preorder' = available, 'out' or 'unknown' = not available
+        is_available = stock_status in ("in", "preorder")
         
         current_state = {
             "name": product_name,
-            "in_stock": is_in_stock,
+            "in_stock": is_available,
+            "stock_status": stock_status,  # Store detailed status
             "last_alerted": previous_state.get("last_alerted") if previous_state else None
         }
         
-        # Detect restock (was out of stock, now in stock)
+        # Detect restock or preorder availability
         change = None
         if previous_state:
-            was_in_stock = previous_state.get("in_stock", False)
-            if not was_in_stock and is_in_stock:
+            was_available = previous_state.get("in_stock", False)
+            prev_status = previous_state.get("stock_status", "out")
+            
+            # Alert if: was out/unknown, now in/preorder
+            if not was_available and is_available:
                 last_alerted = previous_state.get("last_alerted")
                 if should_alert(last_alerted):
                     change = {
-                        "type": "restock",
+                        "type": "preorder" if stock_status == "preorder" else "restock",
                         "name": product_name,
                         "url": url
                     }
@@ -838,29 +836,53 @@ def main():
             state[url] = current_products
             
             if changes and not first_run and not silence_alerts:
-                print(f"Found {len(changes)} changes!")
+                print(f"Found {len(changes)} potential changes - verifying on product pages...")
                 for change in changes:
-                    total_changes += 1
-                    if change["type"] == "new":
-                        if change.get("in_stock", False):
-                            message = f"🆕 **NEW PRODUCT** at {store_name}\n**{change['name']}**"
-                            print(f"    🆕 NEW: {change['name'][:50]}")
-                            send_alert(message, change["url"])
-                            mark_alerted(url, change["url"])
-                            # Update in-memory state to prevent duplicate alerts
-                            if change["url"] in state[url]:
-                                state[url][change["url"]]["last_alerted"] = datetime.now()
+                    product_url = change["url"]
+                    change_type = change["type"]
+                    category_name = change["name"][:50]
+                    
+                    # === CONFIRM STOCK ON PRODUCT PAGE BEFORE ALERTING ===
+                    print(f"    🔍 Verifying: {category_name}...", end=" ")
+                    confirmed_status, confirmed_name = confirm_product_stock(product_url)
+                    
+                    # Use confirmed name if available, otherwise fall back to category name
+                    display_name = confirmed_name if confirmed_name else change["name"]
+                    
+                    # Only alert if product page confirms IN STOCK or PREORDER
+                    if confirmed_status == "in":
+                        total_changes += 1
+                        if change_type == "new":
+                            message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
+                            print(f"✅ IN STOCK!")
                         else:
-                            print(f"    ⏸️ NEW (out of stock, no alert): {change['name'][:50]}")
-                    elif change["type"] == "restock":
-                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
-                        print(f"    📦 RESTOCK: {change['name'][:50]}")
-                        send_alert(message, change["url"])
-                        mark_alerted(url, change["url"])
-                        # Update in-memory state to prevent duplicate alerts
-                        if change["url"] in state[url]:
-                            state[url][change["url"]]["last_alerted"] = datetime.now()
-                            state[url][change["url"]]["in_stock"] = True
+                            message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
+                            print(f"✅ RESTOCKED!")
+                        send_alert(message, product_url)
+                        mark_alerted(url, product_url)
+                        if product_url in state[url]:
+                            state[url][product_url]["last_alerted"] = datetime.now()
+                            state[url][product_url]["in_stock"] = True
+                            
+                    elif confirmed_status == "preorder":
+                        total_changes += 1
+                        message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
+                        print(f"📋 PREORDER!")
+                        send_alert(message, product_url)
+                        mark_alerted(url, product_url)
+                        if product_url in state[url]:
+                            state[url][product_url]["last_alerted"] = datetime.now()
+                            
+                    elif confirmed_status == "out":
+                        print(f"❌ OUT OF STOCK (no alert)")
+                        # Update state to reflect actual stock status
+                        if product_url in state[url]:
+                            state[url][product_url]["in_stock"] = False
+                            
+                    else:  # unknown
+                        print(f"❓ UNKNOWN (no alert)")
+                        # Don't alert on unknown - conservative approach
+                    
                     time.sleep(1)
             else:
                 print(f"OK ({len(current_products)} products)")
@@ -888,12 +910,19 @@ def main():
                 
                 if current_state:
                     direct_state[url] = current_state
-                    stock_status = "IN STOCK" if current_state.get("in_stock") else "OUT OF STOCK"
+                    detailed_status = current_state.get("stock_status", "unknown").upper()
                     
                     if change and not first_run and not silence_alerts:
                         total_changes += 1
-                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
-                        print(f"🔔 RESTOCK!")
+                        change_type = change.get("type", "restock")
+                        
+                        if change_type == "preorder":
+                            message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
+                            print(f"📋 PREORDER!")
+                        else:
+                            message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
+                            print(f"🔔 RESTOCK!")
+                        
                         send_alert(message, change["url"])
                         # Update last_alerted in direct_state
                         direct_state[url]["last_alerted"] = datetime.now()
@@ -901,7 +930,7 @@ def main():
                         save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
                         mark_alerted(url, url)
                     else:
-                        print(f"{stock_status}")
+                        print(f"{detailed_status}")
                     
                     # Save to DB only if stock changed
                     prev_in_stock = prev_state.get("in_stock") if prev_state else None
