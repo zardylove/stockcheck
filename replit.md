@@ -15,11 +15,13 @@ The primary bot (`store_monitor.py`) monitors 59 UK Pokemon TCG store pages from
 
 ### Performance Optimizations (Dec 2024)
 - **Session reuse**: Single `requests.Session()` for connection pooling
-- **Request timeout**: 15 seconds (30s for slow sites)
+- **Request timeout**: 15 seconds (30s for slow sites), max 60s cap
 - **Failed site cache**: Skip sites for 3 minutes after failure
 - **JS page detection**: Skip JavaScript-only pages for 5 minutes
 - **Precompiled regex**: Stock term matching uses compiled patterns
 - **Cycle stats**: Logs fetched/skipped/failed counts and cycle time
+- **Database connection pool**: Reuses connections instead of opening/closing for each query
+- **Traceback logging**: Full stack traces on errors for easier debugging
 
 ## Deployment
 

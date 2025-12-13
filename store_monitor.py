@@ -6,9 +6,14 @@ import random
 import json
 import re
 import psycopg2
+from psycopg2 import pool
 import traceback
 from urllib.parse import urljoin, urlparse, urlunparse
 from datetime import datetime, timedelta
+
+# === DATABASE CONNECTION POOL ===
+DB_POOL = None
+MAX_TIMEOUT = 60  # Global max timeout cap
 DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -64,12 +69,34 @@ SHOPIFY_STORES_WITH_ANTIBOT = [
     "westendgames.co.uk",
 ]
 
+def init_db_pool():
+    """Initialize database connection pool."""
+    global DB_POOL
+    if DATABASE_URL and DB_POOL is None:
+        try:
+            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+            print("✅ Database connection pool initialized")
+        except Exception as e:
+            print(f"❌ Failed to create connection pool: {e}")
+
 def get_db_connection():
-    """Get database connection."""
+    """Get database connection from pool."""
+    global DB_POOL
+    if DB_POOL:
+        return DB_POOL.getconn()
     return psycopg2.connect(DATABASE_URL)
+
+def return_db_connection(conn):
+    """Return connection to pool."""
+    global DB_POOL
+    if DB_POOL and conn:
+        DB_POOL.putconn(conn)
+    elif conn:
+        conn.close()
 
 def init_database():
     """Initialize the database table for product state."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -90,11 +117,13 @@ def init_database():
         """)
         conn.commit()
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         print("✅ Database initialized")
         return True
     except Exception as e:
         print(f"❌ Database error: {e}")
+        if conn:
+            return_db_connection(conn)
         return False
 
 ALERT_COOLDOWN_HOURS = 8
@@ -229,6 +258,7 @@ def load_state():
     if not DATABASE_URL:
         print("❌ DATABASE_URL not set! Cannot load state.")
         return state
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -243,15 +273,18 @@ def load_state():
                 "last_alerted": last_alerted
             }
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         print(f"📂 Database: Loaded {len(rows)} products from {len(state)} stores")
     except Exception as e:
         print(f"❌ Error loading state from database: {e}")
         print("   Bot will treat this as first run - no alerts will be sent")
+        if conn:
+            return_db_connection(conn)
     return state
 
 def save_product(store_url, product_url, product_name, in_stock):
     """Save a single product to the database."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -265,14 +298,17 @@ def save_product(store_url, product_url, product_name, in_stock):
         """, (store_url, product_url, product_name, in_stock))
         conn.commit()
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         return True
     except Exception as e:
         print(f"⚠️ Error saving product: {e}")
+        if conn:
+            return_db_connection(conn)
         return False
 
 def mark_alerted(store_url, product_url):
     """Update last_alerted timestamp for a product."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -283,9 +319,11 @@ def mark_alerted(store_url, product_url):
         """, (store_url, product_url))
         conn.commit()
         cur.close()
-        conn.close()
+        return_db_connection(conn)
     except Exception as e:
         print(f"⚠️ Error marking alerted: {e}")
+        if conn:
+            return_db_connection(conn)
 
 def should_alert(last_alerted):
     """Check if enough time has passed since last alert (8 hour cooldown)."""
@@ -299,6 +337,7 @@ def get_last_alerted_from_db(store_url, product_url):
     """Check database for last_alerted timestamp of a product (for anti-flicker)."""
     if not DATABASE_URL:
         return None
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -309,13 +348,16 @@ def get_last_alerted_from_db(store_url, product_url):
         """, (store_url, product_url))
         row = cur.fetchone()
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         return row[0] if row else None
     except Exception as e:
+        if conn:
+            return_db_connection(conn)
         return None
 
 def is_url_initialized(store_url):
     """Check if a store or direct product has been seen before."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -324,13 +366,16 @@ def is_url_initialized(store_url):
         """, (store_url,))
         exists = cur.fetchone() is not None
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         return exists
     except:
+        if conn:
+            return_db_connection(conn)
         return False
 
 def mark_url_initialized(store_url):
     """Mark a store/direct URL as initialized without alerting."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -341,9 +386,10 @@ def mark_url_initialized(store_url):
         """, (store_url, store_url, "__init__", False))
         conn.commit()
         cur.close()
-        conn.close()
+        return_db_connection(conn)
     except:
-        pass
+        if conn:
+            return_db_connection(conn)
 
 def should_silence_first_run(store_url):
     """Return True if this URL has never been scanned before."""
@@ -351,6 +397,7 @@ def should_silence_first_run(store_url):
 
 def save_state(state):
     """Save entire state to database using batch insert for speed."""
+    conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -376,9 +423,11 @@ def save_state(state):
             conn.commit()
         
         cur.close()
-        conn.close()
+        return_db_connection(conn)
     except Exception as e:
         print(f"⚠️ Error saving state: {e}")
+        if conn:
+            return_db_connection(conn)
 
 def get_headers_for_url(url):
     mobile_sites = [
@@ -417,7 +466,7 @@ def confirm_product_stock(product_url):
     try:
         headers = get_headers_for_url(product_url)
         timeout = get_timeout_for_url(product_url)
-        r = SESSION.get(product_url, headers=headers, timeout=timeout)
+        r = SESSION.get(product_url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
         
         if r.status_code != 200:
             return "unknown", None
@@ -627,7 +676,7 @@ def check_direct_product(url, previous_state, stats):
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
-        r = SESSION.get(url, headers=headers, timeout=timeout)
+        r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
         stats['fetched'] += 1
         
         if r.status_code != 200:
@@ -717,7 +766,7 @@ def check_store_page(url, previous_products, stats):
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
-        r = SESSION.get(url, headers=headers, timeout=timeout)
+        r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
         stats['fetched'] += 1
         
         if r.status_code != 200:
@@ -794,6 +843,9 @@ def check_store_page(url, previous_products, stats):
 
 def main():
     print("🚀 Starting Store Monitor Bot...")
+    
+    # Initialize database connection pool
+    init_db_pool()
     
     if not init_database():
         print("❌ Failed to initialize database. Exiting.")
