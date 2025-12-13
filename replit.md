@@ -64,35 +64,40 @@ For stores that don't have proper category pages (e.g., Saturn Magic uses JavaSc
 
 **Rationale**: Some e-commerce sites have different bot protection or rendering logic based on the client type. Mobile user-agents often face less aggressive blocking.
 
-## Stock Detection Logic
+## Stock Detection Logic (Dec 2024 Update)
 
-**Text-Based Availability Detection**: Instead of relying on structured data or APIs, the system scrapes HTML content and searches for stock-related phrases.
+**Two-Stage Verification**: To eliminate false positives, the bot now uses a two-stage approach:
+1. **Category page scan**: Detects potential new products or restocks
+2. **Product page confirmation**: Before alerting, fetches the actual product page to verify stock status
 
-**Detection Priority**:
-1. If OUT_OF_STOCK term found → Product is out of stock
-2. If IN_STOCK term found (no out of stock term) → Product is in stock
-3. If neither found → Assume in stock (better to alert than miss)
+**classify_stock() Function**: Returns one of four states:
+- `preorder` - Product available for pre-order (ALERTS)
+- `in` - Product in stock (ALERTS)
+- `out` - Product out of stock (NO ALERT)
+- `unknown` - Cannot determine status (NO ALERT - conservative approach)
 
-**OUT_OF_STOCK_TERMS** (indicates unavailable):
-- out of stock, sold out, unavailable, notify when available
-- currently unavailable, temporarily out of stock, pre-order
-- coming soon, not in stock, no stock available, stock: 0
-- notify me when in stock, out-of-stock, soldout, backorder
-- back order, waitlist, wait list, notify me, email when available
+**Detection Priority** (checked in order):
+1. If PREORDER term found (and no OUT term) → `preorder`
+2. If OUT_OF_STOCK term found → `out`
+3. If IN_STOCK term found → `in`
+4. If none found → `unknown`
 
-**IN_STOCK_TERMS** (indicates available):
-- add to cart, add to basket, add to bag, add to trolley
-- add to order, in stock, available, available now
-- available to buy, buy now, order now, item in stock
-- stock available, stock: available, instock, in-stock
-- add to shopping bag, add to shopping cart, purchase now
-- shop now, get it now, ready to ship, ships today
-- in stock now, hurry, only a few left, low stock
-- limited stock, few remaining
+**PREORDER_TERMS** (alerts sent - valuable products):
+- pre-order, preorder, pre order, expected
+- releasing, available from, releases on, preorder now
 
-**Rationale**: E-commerce sites rarely provide consistent APIs or structured data for stock status. Text-based detection works across diverse site implementations.
+**OUT_OF_STOCK_TERMS** (no alert):
+- sold out, out of stock, unavailable, notify when available
+- temporarily out of stock, not in stock, check back soon
+- soldout, backorder, notify me, email when available
 
-**Limitation**: Susceptible to false positives/negatives if sites change their wording.
+**IN_STOCK_TERMS** (alert after confirmation):
+- add to cart, add to basket, add to bag, buy now
+- in stock, available now, order now, ready to ship
+
+**Key Improvement**: Unlike before, the bot no longer assumes "in stock" when uncertain. It now requires positive confirmation from the product page before sending any alert.
+
+**Rationale**: Eliminates false positives from JavaScript template code (like `productFormAddToCart: "Add to cart"`) that appears on pages even when products are sold out.
 
 ## State Management
 
