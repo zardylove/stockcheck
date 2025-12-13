@@ -8,7 +8,6 @@ import re
 import psycopg2
 from urllib.parse import urljoin, urlparse, urlunparse
 from datetime import datetime, timedelta
-
 DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -157,17 +156,19 @@ def classify_stock(text):
     Classify stock status from page text.
     Returns: 'preorder', 'out', 'in', or 'unknown'
     
-    Priority: preorder > out > in > unknown
+    Priority: out > preorder > in > unknown
+    (Out-of-stock takes priority because products can show "Pre-order" but be sold out)
     """
     text_lower = text.lower()
     
-    # Check preorder first (these are valuable alerts)
-    if PREORDER_PATTERN.search(text_lower):
-        return "preorder"
-    
-    # Check out of stock
+    # Check out of stock FIRST - takes priority over everything
+    # Products can show "Pre-order" text but actually be sold out
     if OUT_OF_STOCK_PATTERN.search(text_lower):
         return "out"
+    
+    # Check preorder (only if NOT sold out)
+    if PREORDER_PATTERN.search(text_lower):
+        return "preorder"
     
     # Check in stock
     if IN_STOCK_PATTERN.search(text_lower):
