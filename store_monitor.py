@@ -6,6 +6,7 @@ import random
 import json
 import re
 import psycopg2
+import traceback
 from urllib.parse import urljoin, urlparse, urlunparse
 from datetime import datetime, timedelta
 DISCORD_WEBHOOK = os.getenv("STOCK")
@@ -688,7 +689,8 @@ def check_direct_product(url, previous_state, stats):
         stats['failed'] += 1
         return previous_state, None
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Unexpected error during scan: {e}")
+        traceback.print_exc()
         mark_site_failed(url)
         stats['failed'] += 1
         return previous_state, None
@@ -784,7 +786,8 @@ def check_store_page(url, previous_products, stats):
         stats['failed'] += 1
         return previous_products, []
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Unexpected error during scan: {e}")
+        traceback.print_exc()
         mark_site_failed(url)
         stats['failed'] += 1
         return previous_products, []
