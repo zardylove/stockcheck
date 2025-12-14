@@ -163,7 +163,8 @@ OUT_OF_STOCK_TERMS = [
     "no stock available", "stock: 0", "notify me when in stock", "out-of-stock",
     "soldout", "backorder", "back order", "waitlist", "wait list",
     "notify me", "email when available", "outofstock", "schema.org/outofstock",
-    "check back soon", "sold-out-btn", "notify me when", "register interest"
+    "check back soon", "sold-out-btn", "notify me when", "register interest",
+    "item unavailable"
 ]
 
 IN_STOCK_TERMS = [
@@ -189,7 +190,11 @@ def classify_stock(text):
     Priority: out > preorder > in > unknown
     (Out-of-stock takes priority because products can show "Pre-order" but be sold out)
     """
-    text_lower = text.lower()
+    # Normalize whitespace: replace non-breaking spaces and other Unicode spaces with regular spaces
+    text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
+    # Collapse multiple spaces into one
+    text_normalized = ' '.join(text_normalized.split())
+    text_lower = text_normalized.lower()
     
     # Check out of stock FIRST - takes priority over everything
     # Products can show "Pre-order" text but actually be sold out
