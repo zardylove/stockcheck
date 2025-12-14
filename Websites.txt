@@ -48,7 +48,7 @@ https://www.zavvi.com/franchises/pokemon/pokemon-cards.list
 https://zingaentertainment.com/collections/pokemon
 https://cardsoftheshire.com/collections/sealed-pokemon?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
 https://grandlinecollectiblesltd.com/collections/pokemon-sealed-products?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
-https://thetcgvilla.co.uk/
+https://thetcgvilla.co.uk/collections/pokemon-sealed
 https://gamersathart.co.uk/?s=pokemon+tcg
 https://www.leodisgames.com/search?q=pokemon+tcg&options%5Bprefix%5D=last
 https://collect.thegamecollection.net/collections/pokemon?sort_by=created-descending&filter.v.availability=1
@@ -65,3 +65,6 @@ https://www.mercurytcg.co.uk/english-booster-boxes-packs
 https://justplaygames.uk/collections/pokemon-tcg
 https://thecardvault.co.uk/collections/pokemon-trading-card-game-sealed-booster-packs
 https://thecardvault.co.uk/collections/pokemon-booster-boxes-the-card-vault
+https://www.commonmeeple.co.uk/s/search?q=pokemon%20tcg
+https://jkgames.co.uk/collections/pokemon
+https://www.slabcitycomics.com/collections/tgc/SEALED-POKEMON
