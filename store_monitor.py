@@ -693,6 +693,16 @@ def check_direct_product(url, previous_state, stats):
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
         
+        # DEBUG: Log page text for commonmeeple to diagnose UNKNOWN issue
+        if "commonmeeple" in url:
+            print(f"    DEBUG page length: {len(page_text)} chars")
+            print(f"    DEBUG first 500 chars: {page_text[:500]}")
+            # Check for specific terms
+            text_lower = page_text.lower()
+            print(f"    DEBUG 'out of stock' in page: {'out of stock' in text_lower}")
+            print(f"    DEBUG 'unavailable' in page: {'unavailable' in text_lower}")
+            print(f"    DEBUG 'add to basket' in page: {'add to basket' in text_lower}")
+        
         # Extract product name from page title or h1
         product_name = None
         title_tag = soup.find('title')
