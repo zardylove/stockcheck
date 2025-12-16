@@ -26,6 +26,7 @@ https://www.themeeplerooms.co.uk/collections/pokemon
 https://minisoshop.co.uk/catalogsearch/result/?q=pokemon
 https://moon-whale.com/collections/pokemon-tcg
 https://nerdforged.co.uk/collections/english-booster-packs
+https://nerdforged.co.uk/collections/english-booster-boxes
 https://peakycollectibles.co.uk/collections/pokemon
 https://redcardgames.com/collections/pokemon?sort_by=created-descending&
 https://rockawaytoys.co.uk/collections/vendors?q=The%20Pok%C3%A9mon%20Company%20Int.%20Inc.
@@ -68,3 +69,5 @@ https://thecardvault.co.uk/collections/pokemon-booster-boxes-the-card-vault
 https://www.commonmeeple.co.uk/s/search?q=pokemon%20tcg
 https://jkgames.co.uk/collections/pokemon
 https://www.slabcitycomics.com/collections/tgc/SEALED-POKEMON
+https://gliders.uk.com/collections/pokemon-tcg?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
+https://thesourcerer.co.uk/collections/pokemon-tcg
