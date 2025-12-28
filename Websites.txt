@@ -4,7 +4,7 @@ https://www.apexcards.co.uk/pokemon/products/booster-packs
 https://direct.asda.com/george/clothing/10,default,sc.html?q=POKEMON%20TCG
 https://www.axisgaming.co.uk/shop/Pokemon/7
 https://www.bay-games.co.uk/pok-mon-tcg
-https://www.bremnertcg.co.uk/collections/english-pokemon-products-by-set
+https://www.bremnertcg.co.uk/collections/pokemon-booster-boxes
 https://www.cardlegacy.co.uk/english-pokemon
 https://card-mart.com/
 https://www.chaoscards.co.uk/shop/coming-soon/show/64-products/oos/yes/brand/pokemon
@@ -71,3 +71,5 @@ https://jkgames.co.uk/collections/pokemon
 https://www.slabcitycomics.com/collections/tgc/SEALED-POKEMON
 https://gliders.uk.com/collections/pokemon-tcg?filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
 https://thesourcerer.co.uk/collections/pokemon-tcg
+https://tcgmeta.co.uk
+https://imps-gaming.com/collections/pokemon-tcg
