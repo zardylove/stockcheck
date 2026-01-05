@@ -39,6 +39,65 @@ JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
 JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder', 
                        'please enable javascript', 'browser does not support']
 
+# === PRODUCT TYPE FILTERING (TCG only) ===
+TCG_ALLOW_KEYWORDS = [
+    "booster", "booster pack", "booster box",
+    "elite trainer box", "etb",
+    "tin", "collection",
+    "blister", "sleeved",
+    "build & battle", "build and battle",
+    "prerelease", "pre-release",
+    "theme deck", "battle deck",
+    "starter deck",
+    "promo", "set",
+    "pokemon cards", "trading card",
+    "tcg", "box", "bundle",
+    "surging sparks", "prismatic evolutions",
+    "paldean fates", "151", "obsidian flames",
+    "scarlet & violet", "scarlet and violet",
+    "shrouded fable", "twilight masquerade",
+    "temporal forces", "paradox rift",
+]
+
+NON_TCG_BLOCK_KEYWORDS = [
+    "plush", "plushie", "figure", "toy",
+    "mug", "cup", "glass",
+    "poster", "art", "canvas",
+    "postcard", "stationery",
+    "clothing", "hoodie", "t-shirt", "shirt",
+    "bag", "backpack",
+    "keyring", "keychain",
+    "playmat",
+    "dice", "coin",
+    "notebook", "binder",
+    "squishmallow", "cushion", "pillow",
+    "lamp", "light", "clock",
+    "wallet", "purse",
+    "lunchbox", "water bottle",
+    "blanket", "towel",
+    "hat", "cap", "beanie",
+    "socks", "slippers",
+    "puzzle", "jigsaw",
+    "funko", "pop!",
+]
+
+def is_tcg_product(name: str, url: str = "") -> bool:
+    """Check if a product is a TCG card product (not plushies, toys, etc.)"""
+    text = f"{name} {url}".lower()
+    
+    # Hard block non-TCG items
+    for word in NON_TCG_BLOCK_KEYWORDS:
+        if word in text:
+            return False
+    
+    # Must match at least one TCG keyword
+    for word in TCG_ALLOW_KEYWORDS:
+        if word in text:
+            return True
+    
+    # Default: allow if no block keyword found (for generic product names)
+    return True
+
 SHOPIFY_STORES_WITH_ANTIBOT = [
     "zingaentertainment.com",
     "themeeplerooms.co.uk",
@@ -585,6 +644,10 @@ def extract_products(soup, base_url):
             continue
         
         product_name = product_name[:100]
+        
+        # Filter out non-TCG products (plushies, toys, etc.)
+        if not is_tcg_product(product_name, full_url):
+            continue
         
         card_text = get_product_card_text(link)
         
