@@ -41,7 +41,7 @@ JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder'
 
 # === PRODUCT TYPE FILTERING (TCG only) ===
 TCG_ALLOW_KEYWORDS = [
-    "booster", "booster pack", "booster box",
+    "booster", "booster pack", "booster box","booster bundle"
     "elite trainer box", "etb",
     "tin", "collection",
     "blister", "sleeved",
@@ -52,11 +52,7 @@ TCG_ALLOW_KEYWORDS = [
     "promo", "set",
     "pokemon cards", "trading card",
     "tcg", "box", "bundle",
-    "surging sparks", "prismatic evolutions",
-    "paldean fates", "151", "obsidian flames",
-    "scarlet & violet", "scarlet and violet",
-    "shrouded fable", "twilight masquerade",
-    "temporal forces", "paradox rift",
+
 ]
 
 NON_TCG_BLOCK_KEYWORDS = [
@@ -78,7 +74,7 @@ NON_TCG_BLOCK_KEYWORDS = [
     "hat", "cap", "beanie",
     "socks", "slippers",
     "puzzle", "jigsaw",
-    "funko", "pop!",
+    "funko", "pop!","sleeves","portfolio","accessories",
 ]
 
 def is_tcg_product(name: str, url: str = "") -> bool:

@@ -11,8 +11,8 @@ language = "python3"
 requiredFiles = [".replit", "replit.nix"]
 
 [deployment]
-run = ["sh", "-c", "python3 store_monitor.py"]
-deploymentTarget = "gce"
+run = ["python3", "store_monitor.py"]
+deploymentTarget = "vm"
 ignorePorts = true
 
 [workflows]
