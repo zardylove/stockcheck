@@ -39,28 +39,8 @@ JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
 JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder', 
                        'please enable javascript', 'browser does not support']
 
-# === PRODUCT TYPE FILTERING (TCG only) ===
-TCG_ALLOW_KEYWORDS = [
-    "booster", "booster pack", "booster box", "booster bundle",
-    "elite trainer box", "etb",
-    "tin", "collection",
-    "blister", "sleeved",
-    "build & battle", "build and battle",
-    "prerelease", "pre-release",
-    "theme deck", "battle deck",
-    "starter deck",
-    "promo", "set",
-    "pokemon cards", "trading card",
-    "tcg", "box", "bundle",
-    "surging sparks", "prismatic evolutions",
-    "paldean fates", "151", "obsidian flames",
-    "scarlet & violet", "scarlet and violet",
-    "shrouded fable", "twilight masquerade",
-    "temporal forces", "paradox rift",
-    "journey together", "destined rivals",
-]
-
-NON_TCG_BLOCK_KEYWORDS = [
+# === PRODUCT TYPE FILTERING (block non-TCG items) ===
+BLOCK_KEYWORDS = [
     "plush", "plushie", "figure", "toy",
     "mug", "cup", "glass",
     "poster", "art", "canvas",
@@ -79,24 +59,19 @@ NON_TCG_BLOCK_KEYWORDS = [
     "hat", "cap", "beanie",
     "socks", "slippers",
     "puzzle", "jigsaw",
-    "funko", "pop!","sleeves","portfolio","accessories",
+    "funko", "pop!", "sleeves", "portfolio", "accessories",
 ]
 
 def is_tcg_product(name: str, url: str = "") -> bool:
-    """Check if a product is a TCG card product (not plushies, toys, etc.)"""
+    """Check if a product should be tracked (not blocked items like plushies, toys, etc.)"""
     text = f"{name} {url}".lower()
     
-    # Hard block non-TCG items
-    for word in NON_TCG_BLOCK_KEYWORDS:
+    # Block items matching ignore keywords
+    for word in BLOCK_KEYWORDS:
         if word in text:
             return False
     
-    # Must match at least one TCG keyword
-    for word in TCG_ALLOW_KEYWORDS:
-        if word in text:
-            return True
-    
-    # Default: allow if no block keyword found (for generic product names)
+    # Allow everything else by default
     return True
 
 SHOPIFY_STORES_WITH_ANTIBOT = [
