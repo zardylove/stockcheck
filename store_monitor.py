@@ -107,12 +107,24 @@ SHOPIFY_STORES_WITH_ANTIBOT = [
 def init_db_pool():
     """Initialize database connection pool."""
     global DB_POOL
-    if DATABASE_URL and DB_POOL is None:
+    print(f"🔌 Checking database connection...")
+    print(f"   DATABASE_URL exists: {bool(DATABASE_URL)}")
+    print(f"   REPLIT_DEPLOYMENT: {os.getenv('REPLIT_DEPLOYMENT')}")
+    
+    if not DATABASE_URL:
+        print("❌ DATABASE_URL not found! Database features will be disabled.")
+        return False
+    
+    if DB_POOL is None:
         try:
-            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL)
+            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL, connect_timeout=10)
             print("✅ Database connection pool initialized")
+            return True
         except Exception as e:
             print(f"❌ Failed to create connection pool: {e}")
+            traceback.print_exc()
+            return False
+    return True
 
 def get_db_connection():
     """Get database connection from pool."""
@@ -887,12 +899,31 @@ def check_store_page(url, previous_products, stats):
 
 def main():
     print("🚀 Starting Store Monitor Bot...")
+    print(f"   Python version: {os.popen('python3 --version').read().strip()}")
+    print(f"   Time: {datetime.now()}")
+    print(f"   Production mode: {IS_PRODUCTION}")
+    print()
     
-    # Initialize database connection pool
-    init_db_pool()
+    # Initialize database connection pool with retry for production
+    max_retries = 3 if IS_PRODUCTION else 1
+    db_ready = False
     
-    if not init_database():
-        print("❌ Failed to initialize database. Exiting.")
+    for attempt in range(max_retries):
+        if attempt > 0:
+            print(f"   Retry {attempt + 1}/{max_retries} in 10 seconds...")
+            time.sleep(10)
+        
+        if init_db_pool():
+            if init_database():
+                db_ready = True
+                break
+            else:
+                print("❌ Database table initialization failed")
+        else:
+            print("❌ Database pool initialization failed")
+    
+    if not db_ready:
+        print("❌ Failed to initialize database after retries. Exiting.")
         return
     
     print(f"📋 Loading URLs from Websites.txt...")
