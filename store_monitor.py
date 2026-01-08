@@ -14,9 +14,27 @@ from datetime import datetime, timedelta
 # === DATABASE CONNECTION POOL ===
 DB_POOL = None
 MAX_TIMEOUT = 60  # Global max timeout cap
-DISCORD_WEBHOOK = os.getenv("STOCK")
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# === FRANCHISE CONFIGURATIONS ===
+FRANCHISES = [
+    {
+        "name": "Pokemon",
+        "store_file": "PokeWebsites.txt",
+        "direct_file": "PokeDirectProducts.txt",
+        "webhook": os.getenv("POKESTOCK")
+    },
+    {
+        "name": "One Piece",
+        "store_file": "OPWebsites.txt",
+        "direct_file": "OPDirectProducts.txt",
+        "webhook": os.getenv("OPSTOCK")
+    }
+]
+
+# Current webhook for the active franchise (set during scanning)
+CURRENT_WEBHOOK = None
 
 # === OPTIMIZATION: Reusable session for connection pooling ===
 SESSION = requests.Session()
@@ -296,7 +314,7 @@ def add_to_js_skip_cache(url):
     """Add URL to JS skip cache."""
     JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
 
-def load_urls(file_path="Websites.txt"):
+def load_urls(file_path="PokeWebsites.txt"):
     try:
         with open(file_path, "r") as f:
             return [line.strip() for line in f if line.strip() and line.startswith("http")]
@@ -491,16 +509,17 @@ def get_headers_for_url(url):
         return MOBILE_HEADERS
     return HEADERS
 
-def send_alert(message, url):
-    if not DISCORD_WEBHOOK:
-        print("Warning: STOCK webhook not configured")
+def send_alert(message, url, webhook=None):
+    webhook_url = webhook or CURRENT_WEBHOOK
+    if not webhook_url:
+        print("Warning: Webhook not configured for this franchise")
         return
     
     data = {
         "content": f"🚨 **STOCK ALERT** 🚨\n{message}\n{url}"
     }
     try:
-        r = requests.post(DISCORD_WEBHOOK, json=data, timeout=10)
+        r = requests.post(webhook_url, json=data, timeout=10)
         if r.status_code == 204:
             print(f"✅ Alert sent!")
         else:
@@ -898,10 +917,13 @@ def check_store_page(url, previous_products, stats):
         return previous_products, []
 
 def main():
+    global CURRENT_WEBHOOK
+    
     print("🚀 Starting Store Monitor Bot...")
     print(f"   Python version: {os.popen('python3 --version').read().strip()}")
     print(f"   Time: {datetime.now()}")
     print(f"   Production mode: {IS_PRODUCTION}")
+    print(f"   Franchises: {', '.join(f['name'] for f in FRANCHISES)}")
     print()
     
     # Initialize database connection pool with retry for production
@@ -926,175 +948,190 @@ def main():
         print("❌ Failed to initialize database after retries. Exiting.")
         return
     
-    print(f"📋 Loading URLs from Websites.txt...")
-    
-    urls = load_urls()
-    if not urls:
-        print("No URLs to check. Add URLs to Websites.txt")
-        return
-    
-    direct_urls = [normalize_product_url(u) for u in load_urls("DirectProducts.txt") if normalize_product_url(u)]
-    
-    print(f"Found {len(urls)} store pages to monitor")
-    if direct_urls:
-        print(f"Found {len(direct_urls)} direct products to monitor")
-    print(f"Check interval: {CHECK_INTERVAL} seconds\n")
-    
+    # Load state from database
     state = load_state()
-    direct_state = load_state()  # Database-backed direct product states
+    direct_state = load_state()
     first_run = len(state) == 0
     
     if first_run:
         print("🆕 First run - building initial product database...")
         print("   (No alerts will be sent on first run)\n")
     
+    # Print franchise summary
+    for franchise in FRANCHISES:
+        store_urls = load_urls(franchise["store_file"])
+        direct_urls = load_urls(franchise["direct_file"])
+        webhook_status = "✅" if franchise["webhook"] else "❌"
+        print(f"   {franchise['name']}: {len(store_urls)} stores, {len(direct_urls)} direct products, Webhook: {webhook_status}")
+    print()
+    
     while True:
-        # === OPTIMIZATION: Cycle stats tracking ===
-        stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
         cycle_start = time.time()
+        total_cycle_changes = 0
+        total_stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
         
-        print(f"🔍 Scanning {len(urls)} store pages...")
-        total_changes = 0
-        
-        for url in urls:
-            store_name = urlparse(url).netloc
-            print(f"  Checking: {store_name}...", end=" ")
+        # === SCAN EACH FRANCHISE ===
+        for franchise in FRANCHISES:
+            franchise_name = franchise["name"]
+            CURRENT_WEBHOOK = franchise["webhook"]
             
-            # Silent first scan for new URLs - skip entirely to prevent restart issues
-            silence_alerts = should_silence_first_run(url)
-            if silence_alerts:
-                mark_url_initialized(url)
-                print(f"🆕 First scan, will scan next cycle")
-                time.sleep(random.uniform(1, 2))
+            print(f"\n{'='*50}")
+            print(f"📋 Scanning {franchise_name}...")
+            print(f"{'='*50}")
+            
+            # Load URLs for this franchise
+            urls = load_urls(franchise["store_file"])
+            direct_urls = [normalize_product_url(u) for u in load_urls(franchise["direct_file"]) if normalize_product_url(u)]
+            
+            if not urls and not direct_urls:
+                print(f"   No URLs configured for {franchise_name}")
                 continue
             
-            prev_products = state.get(url, {})
-            current_products, changes = check_store_page(url, prev_products, stats)
+            stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
+            franchise_changes = 0
             
-            state[url] = current_products
-            
-            if changes and not first_run and not silence_alerts:
-                print(f"Found {len(changes)} potential changes - verifying on product pages...")
-                for change in changes:
-                    product_url = change["url"]
-                    change_type = change["type"]
-                    category_name = change["name"][:50]
+            # === SCAN STORE PAGES ===
+            if urls:
+                print(f"\n🔍 Scanning {len(urls)} {franchise_name} store pages...")
+                for url in urls:
+                    store_name = urlparse(url).netloc
+                    print(f"  Checking: {store_name}...", end=" ")
                     
-                    # === CONFIRM STOCK ON PRODUCT PAGE BEFORE ALERTING ===
-                    print(f"    🔍 Verifying: {category_name}...", end=" ")
-                    confirmed_status, confirmed_name = confirm_product_stock(product_url)
+                    silence_alerts = should_silence_first_run(url)
+                    if silence_alerts:
+                        mark_url_initialized(url)
+                        print(f"🆕 First scan, will scan next cycle")
+                        time.sleep(random.uniform(1, 2))
+                        continue
                     
-                    # Use confirmed name if available, otherwise fall back to category name
-                    display_name = confirmed_name if confirmed_name else change["name"]
+                    prev_products = state.get(url, {})
+                    current_products, changes = check_store_page(url, prev_products, stats)
                     
-                    # Only alert if product page confirms IN STOCK or PREORDER
-                    if confirmed_status == "in":
-                        total_changes += 1
-                        if change_type == "new":
-                            message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
-                            print(f"✅ IN STOCK!")
-                        else:
-                            message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
-                            print(f"✅ RESTOCKED!")
-                        send_alert(message, product_url)
-                        mark_alerted(url, product_url)
-                        if product_url in state[url]:
-                            state[url][product_url]["last_alerted"] = datetime.now()
-                            state[url][product_url]["in_stock"] = True
+                    state[url] = current_products
+                    
+                    if changes and not first_run and not silence_alerts:
+                        print(f"Found {len(changes)} potential changes - verifying on product pages...")
+                        for change in changes:
+                            product_url = change["url"]
+                            change_type = change["type"]
+                            category_name = change["name"][:50]
                             
-                    elif confirmed_status == "preorder":
-                        total_changes += 1
-                        message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
-                        print(f"📋 PREORDER!")
-                        send_alert(message, product_url)
-                        mark_alerted(url, product_url)
-                        if product_url in state[url]:
-                            state[url][product_url]["last_alerted"] = datetime.now()
+                            print(f"    🔍 Verifying: {category_name}...", end=" ")
+                            confirmed_status, confirmed_name = confirm_product_stock(product_url)
                             
-                    elif confirmed_status == "out":
-                        print(f"❌ OUT OF STOCK (no alert)")
-                        # Update state to reflect actual stock status
-                        if product_url in state[url]:
-                            state[url][product_url]["in_stock"] = False
+                            display_name = confirmed_name if confirmed_name else change["name"]
                             
-                    else:  # unknown
-                        print(f"❓ UNKNOWN (no alert)")
-                        # Don't alert on unknown - conservative approach
-                    
-                    time.sleep(1)
-            else:
-                print(f"OK ({len(current_products)} products)")
-            
-            time.sleep(random.uniform(2, 4))
-        
-        # Check direct product URLs
-        if direct_urls:
-            print(f"\n🎯 Checking {len(direct_urls)} direct products...")
-            for url in direct_urls:
-                store_name = urlparse(url).netloc
-                print(f"  Checking: {store_name}...", end=" ")
-                
-                # Silent first scan for new direct product URLs
-                silence_alerts = should_silence_first_run(url)
-                if silence_alerts:
-                    mark_url_initialized(url)
-                    # Set last_alerted to prevent flicker on first scan
-                    direct_state[url] = {"name": "", "in_stock": True, "last_alerted": datetime.now()}
-                    print(f"🆕 First scan, alerts silenced")
-                    continue
-                
-                prev_state = direct_state.get(url)
-                current_state, change = check_direct_product(url, prev_state, stats)
-                
-                if current_state:
-                    direct_state[url] = current_state
-                    detailed_status = current_state.get("stock_status", "unknown").upper()
-                    
-                    if change and not first_run and not silence_alerts:
-                        total_changes += 1
-                        change_type = change.get("type", "restock")
-                        
-                        if change_type == "preorder":
-                            message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
-                            print(f"📋 PREORDER!")
-                        else:
-                            message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
-                            print(f"🔔 RESTOCK!")
-                        
-                        send_alert(message, change["url"])
-                        # Update last_alerted in direct_state
-                        direct_state[url]["last_alerted"] = datetime.now()
-                        # Save to database on alert
-                        save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
-                        mark_alerted(url, url)
+                            if confirmed_status == "in":
+                                franchise_changes += 1
+                                if change_type == "new":
+                                    message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
+                                    print(f"✅ IN STOCK!")
+                                else:
+                                    message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
+                                    print(f"✅ RESTOCKED!")
+                                send_alert(message, product_url)
+                                mark_alerted(url, product_url)
+                                if product_url in state[url]:
+                                    state[url][product_url]["last_alerted"] = datetime.now()
+                                    state[url][product_url]["in_stock"] = True
+                                    
+                            elif confirmed_status == "preorder":
+                                franchise_changes += 1
+                                message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
+                                print(f"📋 PREORDER!")
+                                send_alert(message, product_url)
+                                mark_alerted(url, product_url)
+                                if product_url in state[url]:
+                                    state[url][product_url]["last_alerted"] = datetime.now()
+                                    
+                            elif confirmed_status == "out":
+                                print(f"❌ OUT OF STOCK (no alert)")
+                                if product_url in state[url]:
+                                    state[url][product_url]["in_stock"] = False
+                                    
+                            else:
+                                print(f"❓ UNKNOWN (no alert)")
+                            
+                            time.sleep(1)
                     else:
-                        print(f"{detailed_status}")
+                        print(f"OK ({len(current_products)} products)")
                     
-                    # Save to DB only if stock changed
-                    prev_in_stock = prev_state.get("in_stock") if prev_state else None
-                    if current_state.get("in_stock") != prev_in_stock:
-                        save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
-                
-                time.sleep(random.uniform(2, 4))
+                    time.sleep(random.uniform(2, 4))
+            
+            # === SCAN DIRECT PRODUCTS ===
+            if direct_urls:
+                print(f"\n🎯 Checking {len(direct_urls)} {franchise_name} direct products...")
+                for url in direct_urls:
+                    store_name = urlparse(url).netloc
+                    print(f"  Checking: {store_name}...", end=" ")
+                    
+                    silence_alerts = should_silence_first_run(url)
+                    if silence_alerts:
+                        mark_url_initialized(url)
+                        direct_state[url] = {"name": "", "in_stock": True, "last_alerted": datetime.now()}
+                        print(f"🆕 First scan, alerts silenced")
+                        continue
+                    
+                    prev_state = direct_state.get(url)
+                    current_state, change = check_direct_product(url, prev_state, stats)
+                    
+                    if current_state:
+                        direct_state[url] = current_state
+                        detailed_status = current_state.get("stock_status", "unknown").upper()
+                        
+                        if change and not first_run and not silence_alerts:
+                            franchise_changes += 1
+                            change_type = change.get("type", "restock")
+                            
+                            if change_type == "preorder":
+                                message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
+                                print(f"📋 PREORDER!")
+                            else:
+                                message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
+                                print(f"🔔 RESTOCK!")
+                            
+                            send_alert(message, change["url"])
+                            direct_state[url]["last_alerted"] = datetime.now()
+                            save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
+                            mark_alerted(url, url)
+                        else:
+                            print(f"{detailed_status}")
+                        
+                        prev_in_stock = prev_state.get("in_stock") if prev_state else None
+                        if current_state.get("in_stock") != prev_in_stock:
+                            save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
+                    
+                    time.sleep(random.uniform(2, 4))
+            
+            # Franchise summary
+            print(f"\n📊 {franchise_name}: {franchise_changes} alerts sent")
+            print(f"   Stats: {stats['fetched']} fetched, {stats['skipped']} skipped, {stats['failed']} failed")
+            
+            total_cycle_changes += franchise_changes
+            total_stats['fetched'] += stats['fetched']
+            total_stats['skipped'] += stats['skipped']
+            total_stats['failed'] += stats['failed']
         
         save_state(state)
         
-        # === OPTIMIZATION: Cycle stats summary ===
+        # === CYCLE SUMMARY ===
         cycle_time = round(time.time() - cycle_start, 1)
         
         if first_run:
             total_products = sum(len(products) for products in state.values())
-            print(f"\n✅ Initial scan complete! Tracking {total_products} products across {len(urls)} stores")
-            print("   Future changes will trigger Discord alerts.\n")
+            print(f"\n{'='*50}")
+            print(f"✅ Initial scan complete! Tracking {total_products} products")
+            print("   Future changes will trigger Discord alerts.")
+            print(f"{'='*50}\n")
             first_run = False
         else:
-            if total_changes > 0:
-                print(f"\n📊 Scan complete. {total_changes} changes detected and alerted.")
+            print(f"\n{'='*50}")
+            if total_cycle_changes > 0:
+                print(f"📊 Cycle complete. {total_cycle_changes} total alerts sent.")
             else:
-                print(f"\n📊 Scan complete. No changes detected.")
+                print(f"📊 Cycle complete. No changes detected.")
         
-        # Print cycle stats
-        print(f"📈 Stats: {stats['fetched']} fetched, {stats['skipped']} skipped, {stats['failed']} failed | Cycle: {cycle_time}s")
+        print(f"📈 Total: {total_stats['fetched']} fetched, {total_stats['skipped']} skipped, {total_stats['failed']} failed | Cycle: {cycle_time}s")
         if FAILED_SITES:
             print(f"   ⏸️ {len(FAILED_SITES)} sites in failure cooldown")
         if JS_SKIP_CACHE:

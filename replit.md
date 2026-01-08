@@ -1,13 +1,19 @@
 # Overview
 
-This is a Python-based stock monitoring system that tracks Pokemon Trading Card Game (TCG) product availability across multiple UK retailers. The application scrapes store category pages to detect new products and stock changes, sending real-time Discord notifications.
+This is a Python-based stock monitoring system that tracks Trading Card Game (TCG) product availability across multiple UK retailers. The application scrapes store category pages to detect new products and stock changes, sending real-time Discord notifications.
 
 ## Main Bot: store_monitor.py
 
-The primary bot (`store_monitor.py`) monitors 91 UK Pokemon TCG store pages from `Websites.txt`:
+The primary bot (`store_monitor.py`) supports **multiple franchises** with separate Discord webhooks:
+
+### Supported Franchises
+- **Pokemon**: Monitors `PokeWebsites.txt` and `PokeDirectProducts.txt`, alerts to `POKESTOCK` webhook
+- **One Piece**: Monitors `OPWebsites.txt` and `OPDirectProducts.txt`, alerts to `OPSTOCK` webhook
+
+### Features
 - Detects **new products** added to store pages
 - Detects **restocks** (products changing from out-of-stock to in-stock)
-- Sends Discord alerts via the `STOCK` webhook
+- Sends Discord alerts to **franchise-specific webhooks**
 - Stores product state in **PostgreSQL database** (persists across republishes)
 - Runs continuously with no delay between scan cycles
 - **TCG-only filtering**: Filters out plushies, toys, figures, and non-card products
@@ -42,10 +48,11 @@ Preferred communication style: Simple, everyday language.
 - Compares against previous scan to detect changes
 - Alerts on new products AND restocks
 
-**URL Files**:
-- `Websites.txt` - Store category pages (48 UK retailers)
-- `DirectProducts.txt` - Individual product URLs for direct stock monitoring
-- Legacy: `151bb.txt`, `prisbb.txt`, etc. - Specific product URLs
+**URL Files** (per franchise):
+- `PokeWebsites.txt` - Pokemon store category pages (90 UK retailers)
+- `PokeDirectProducts.txt` - Individual Pokemon product URLs
+- `OPWebsites.txt` - One Piece store category pages
+- `OPDirectProducts.txt` - Individual One Piece product URLs
 
 **Adding New URLs**: Simply edit the text files - one URL per line. The bot will pick them up on the next scan.
 
