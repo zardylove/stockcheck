@@ -317,7 +317,13 @@ def add_to_js_skip_cache(url):
 def load_urls(file_path="PokeWebsites.txt"):
     try:
         with open(file_path, "r") as f:
-            return [line.strip() for line in f if line.strip() and line.startswith("http")]
+            urls = []
+            for line in f:
+                line = line.strip()
+                if line and line.startswith("http"):
+                    url = line.split()[0]
+                    urls.append(url)
+            return urls
     except FileNotFoundError:
         print(f"Error: {file_path} not found")
         return []
