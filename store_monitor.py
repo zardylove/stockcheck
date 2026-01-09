@@ -76,7 +76,7 @@ BLOCK_KEYWORDS = [
     "blanket", "towel",
     "hat", "cap", "beanie",
     "socks", "slippers",
-    "puzzle", "jigsaw",
+    "puzzle", "jigsaw", "challenge",
     "funko", "pop!", "sleeves", "portfolio", "accessories", "event",
 ]
 
@@ -550,6 +550,7 @@ def confirm_product_stock(product_url):
         
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
+        raw_html = r.text
         
         # Extract product name
         product_name = None
@@ -561,8 +562,8 @@ def confirm_product_stock(product_url):
             if h1:
                 product_name = h1.get_text(strip=True)[:100]
         
-        # Classify stock status from product page
-        stock_status = classify_stock(page_text)
+        # Classify stock status - check both visible text AND raw HTML for schema.org data
+        stock_status = classify_stock(page_text + " " + raw_html)
         
         return stock_status, product_name
         
@@ -768,6 +769,7 @@ def check_direct_product(url, previous_state, stats):
         
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
+        raw_html = r.text
         
         # Extract product name from page title or h1
         product_name = None
@@ -781,8 +783,8 @@ def check_direct_product(url, previous_state, stats):
         if not product_name:
             product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
         
-        # Use classify_stock for consistent detection
-        stock_status = classify_stock(page_text)
+        # Use classify_stock - check both visible text AND raw HTML for schema.org data
+        stock_status = classify_stock(page_text + " " + raw_html)
         
         # Map stock_status to in_stock boolean (for DB compatibility)
         # 'in' or 'preorder' = available, 'out' or 'unknown' = not available
