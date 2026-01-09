@@ -1072,34 +1072,51 @@ def main():
                     print(f"  Checking: {store_name}...", end=" ")
                     
                     silence_alerts = should_silence_first_run(url)
-                    if silence_alerts:
-                        mark_url_initialized(url)
-                        direct_state[url] = {"name": "", "in_stock": True, "last_alerted": datetime.now()}
-                        print(f"🆕 First scan, alerts silenced")
-                        continue
-                    
                     prev_state = direct_state.get(url)
                     current_state, change = check_direct_product(url, prev_state, stats)
+                    
+                    if silence_alerts:
+                        mark_url_initialized(url)
+                        if current_state:
+                            current_state["last_alerted"] = datetime.now()
+                            direct_state[url] = current_state
+                        else:
+                            direct_state[url] = {"name": "", "in_stock": False, "stock_status": "out", "last_alerted": datetime.now()}
+                        print(f"🆕 First scan, alerts silenced")
+                        continue
                     
                     if current_state:
                         direct_state[url] = current_state
                         detailed_status = current_state.get("stock_status", "unknown").upper()
                         
                         if change and not first_run and not silence_alerts:
-                            franchise_changes += 1
-                            change_type = change.get("type", "restock")
-                            
-                            if change_type == "preorder":
-                                message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
-                                print(f"📋 PREORDER!")
+                            print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
+                            time.sleep(1)
+                            verified_state, _ = check_direct_product(url, None, {"fetched": 0, "skipped": 0, "failed": 0})
+                            if verified_state:
+                                verified_status = verified_state.get("stock_status", "unknown")
+                                if verified_status in ("in", "preorder"):
+                                    franchise_changes += 1
+                                    change_type = change.get("type", "restock")
+                                    
+                                    if change_type == "preorder" or verified_status == "preorder":
+                                        message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
+                                        print(f"✅ PREORDER CONFIRMED!")
+                                    else:
+                                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
+                                        print(f"✅ RESTOCK CONFIRMED!")
+                                    
+                                    send_alert(message, change["url"])
+                                    direct_state[url]["last_alerted"] = datetime.now()
+                                    direct_state[url]["in_stock"] = True
+                                    save_product(url, url, current_state.get("name"), True)
+                                    mark_alerted(url, url)
+                                else:
+                                    print(f"❌ Verification failed ({verified_status.upper()})")
+                                    direct_state[url]["in_stock"] = False
+                                    save_product(url, url, current_state.get("name"), False)
                             else:
-                                message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
-                                print(f"🔔 RESTOCK!")
-                            
-                            send_alert(message, change["url"])
-                            direct_state[url]["last_alerted"] = datetime.now()
-                            save_product(url, url, current_state.get("name"), current_state.get("in_stock"))
-                            mark_alerted(url, url)
+                                print(f"❌ Verification failed (no response)")
                         else:
                             print(f"{detailed_status}")
                         
