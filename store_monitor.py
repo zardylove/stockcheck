@@ -219,7 +219,7 @@ MOBILE_HEADERS = {
 PREORDER_TERMS = [
     "pre-order", "preorder", "pre order", "expected",
     "releasing", "available from", "releases on", "preorder now",
-    "pre-order now", "coming", "presale", "pre-sale"
+    "pre-order now", "presale", "pre-sale"
 ]
 
 OUT_OF_STOCK_TERMS = [
@@ -229,7 +229,7 @@ OUT_OF_STOCK_TERMS = [
     "soldout", "backorder", "back order", "waitlist", "wait list",
     "notify me", "email when available", "outofstock", "schema.org/outofstock",
     "check back soon", "sold-out-btn", "notify me when", "register interest",
-    "item unavailable"
+    "item unavailable", "coming soon"
 ]
 
 IN_STOCK_TERMS = [
