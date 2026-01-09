@@ -77,7 +77,7 @@ BLOCK_KEYWORDS = [
     "hat", "cap", "beanie",
     "socks", "slippers",
     "puzzle", "jigsaw",
-    "funko", "pop!", "sleeves", "portfolio", "accessories",
+    "funko", "pop!", "sleeves", "portfolio", "accessories", "event",
 ]
 
 def is_tcg_product(name: str, url: str = "") -> bool:
