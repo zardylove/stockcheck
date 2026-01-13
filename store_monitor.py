@@ -238,8 +238,8 @@ IN_STOCK_TERMS = [
     "add to order", "in stock", "available now", "available to buy",
     "buy now", "order now", "item in stock", "stock available",
     "stock: available", "instock", "in-stock", "add to shopping bag",
-    "add to shopping cart", "purchase now", "shop now", "get it now",
-    "ready to ship", "ships today", "in stock now", "hurry",
+    "add to shopping cart", "purchase now", "get it now",
+    "ready to ship", "ships today", "in stock now",
     "only a few left", "low stock", "limited stock", "few remaining"
 ]
 
