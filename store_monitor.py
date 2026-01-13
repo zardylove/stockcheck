@@ -217,9 +217,10 @@ MOBILE_HEADERS = {
 
 # === STOCK CLASSIFICATION TERMS ===
 PREORDER_TERMS = [
-    "pre-order", "preorder", "pre order", "expected",
-    "releasing", "available from", "releases on", "preorder now",
-    "pre-order now", "presale", "pre-sale"
+    "pre-order now", "preorder now", "available for pre-order", "available for preorder",
+    "pre order now", "add to pre-order", "expected release", "expected dispatch",
+    "releasing soon", "available from", "releases on", "presale", "pre-sale",
+    "preorder available", "pre-order available"
 ]
 
 OUT_OF_STOCK_TERMS = [
@@ -252,29 +253,56 @@ def classify_stock(text):
     Classify stock status from page text.
     Returns: 'preorder', 'out', 'in', or 'unknown'
     
-    Priority: out > preorder > in > unknown
-    (Out-of-stock takes priority because products can show "Pre-order" but be sold out)
+    Strategy:
+    1. Check for authoritative schema.org/JSON data (highest priority)
+    2. Then use position-based detection for visible content
     """
-    # Normalize whitespace: replace non-breaking spaces and other Unicode spaces with regular spaces
+    # Normalize whitespace
     text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
-    # Collapse multiple spaces into one
     text_normalized = ' '.join(text_normalized.split())
     text_lower = text_normalized.lower()
     
-    # Check out of stock FIRST - takes priority over everything
-    # Products can show "Pre-order" text but actually be sold out
-    if OUT_OF_STOCK_PATTERN.search(text_lower):
-        return "out"
+    # PRIORITY 1: Check for authoritative structured data (schema.org, JSON)
+    # These are definitive indicators from structured product data
+    authoritative_out_terms = [
+        "schema.org/outofstock",
+        '"availability":"outofstock"', '"availability": "outofstock"',
+        '"availability":"out of stock"', '"availability": "out of stock"',
+        '"stock_status":"outofstock"', '"stock_status": "outofstock"',
+        "currently unavailable.",  # With period - specific phrase in JSON
+    ]
+    for term in authoritative_out_terms:
+        if term in text_lower:
+            return "out"
     
-    # Check preorder (only if NOT sold out)
-    if PREORDER_PATTERN.search(text_lower):
-        return "preorder"
+    # PRIORITY 2: Position-based detection for visible content
+    out_match = OUT_OF_STOCK_PATTERN.search(text_lower)
+    in_match = IN_STOCK_PATTERN.search(text_lower)
+    preorder_match = PREORDER_PATTERN.search(text_lower)
     
-    # Check in stock
-    if IN_STOCK_PATTERN.search(text_lower):
-        return "in"
+    # Collect matches with their positions
+    matches = []
+    if out_match:
+        matches.append(('out', out_match.start()))
+    if in_match:
+        matches.append(('in', in_match.start()))
+    if preorder_match:
+        matches.append(('preorder', preorder_match.start()))
     
-    return "unknown"
+    if not matches:
+        return "unknown"
+    
+    # Sort by position - earliest match wins (main product comes first)
+    matches.sort(key=lambda x: x[1])
+    first_status = matches[0][0]
+    
+    # Special case: if first is "in" but "out" appears very close after (within 500 chars),
+    # might be a "was in stock, now out" situation - prefer "out" in that case
+    if first_status == 'in' and out_match:
+        if out_match.start() - in_match.start() < 500:
+            return "out"
+    
+    return first_status
 
 def is_site_in_failure_cooldown(url):
     """Check if a site is in failure cooldown (failed recently)."""
