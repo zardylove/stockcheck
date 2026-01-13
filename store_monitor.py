@@ -929,7 +929,24 @@ def check_store_page(url, previous_products, stats):
             else:
                 prev_info = previous_products[product_url]
                 current_products[product_url]["last_alerted"] = prev_info.get("last_alerted")
-                if not prev_info.get("in_stock", False) and product_info["in_stock"]:
+                
+                # Detect potential restocks:
+                # 1. Product was out of stock, now shows preorder (in_stock=True from category)
+                # 2. Product was out of stock, now shows "in" on category page (needs verification)
+                category_state = product_info.get("category_state", "unknown")
+                was_out = not prev_info.get("in_stock", False)
+                
+                # Case 1: Became preorder (already marked in_stock=True)
+                if was_out and product_info["in_stock"]:
+                    last_alerted = prev_info.get("last_alerted")
+                    if should_alert(last_alerted):
+                        changes.append({
+                            "type": "restock",
+                            "name": product_info["name"],
+                            "url": product_url
+                        })
+                # Case 2: Shows "in stock" on category page - needs verification
+                elif was_out and category_state == "in":
                     last_alerted = prev_info.get("last_alerted")
                     if should_alert(last_alerted):
                         changes.append({
