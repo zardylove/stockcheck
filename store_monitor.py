@@ -92,6 +92,32 @@ def is_tcg_product(name: str, url: str = "") -> bool:
     # Allow everything else by default
     return True
 
+# === STORE UNAVAILABILITY DETECTION (platform-agnostic) ===
+STORE_UNAVAILABLE_MARKERS = [
+    "enter using password",
+    "password protected",
+    "store closed",
+    "temporarily closed",
+    "temporarily unavailable",
+    "site is unavailable",
+    "maintenance mode",
+    "under maintenance",
+    "we'll be back soon",
+    "coming back soon",
+    "closed until",
+    "currently unavailable",
+    "are you the store owner",
+    "admin login",
+    "restricted access"
+]
+
+def is_store_unavailable(text: str) -> bool:
+    """Check if page indicates store is unavailable/maintenance/password-protected."""
+    if not text:
+        return False
+    text = text.lower()
+    return any(marker in text for marker in STORE_UNAVAILABLE_MARKERS)
+
 SHOPIFY_STORES_WITH_ANTIBOT = [
     "zingaentertainment.com",
     "themeeplerooms.co.uk",
@@ -580,7 +606,7 @@ def confirm_product_stock(product_url):
         page_text = soup.get_text()
         raw_html = r.text
         
-        # Extract product name
+        # Extract product name first (needed for return)
         product_name = None
         title_tag = soup.find('title')
         if title_tag:
@@ -589,6 +615,11 @@ def confirm_product_stock(product_url):
             h1 = soup.find('h1')
             if h1:
                 product_name = h1.get_text(strip=True)[:100]
+        
+        # Block alerts if store is unavailable / maintenance / password protected
+        if is_store_unavailable(page_text):
+            print("⚠️ Store unavailable/maintenance – treating as OUT")
+            return "out", product_name
         
         # Classify stock status - check both visible text AND raw HTML for schema.org data
         stock_status = classify_stock(page_text + " " + raw_html)
@@ -810,6 +841,16 @@ def check_direct_product(url, previous_state, stats):
                 product_name = h1.get_text(strip=True)[:100]
         if not product_name:
             product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
+        
+        # Block alerts if store is unavailable / maintenance / password protected
+        if is_store_unavailable(page_text):
+            print("⚠️ Store unavailable/maintenance – treating as OUT")
+            return {
+                "name": product_name,
+                "in_stock": False,
+                "stock_status": "out",
+                "last_alerted": previous_state.get("last_alerted") if previous_state else None
+            }, None
         
         # Use classify_stock - check both visible text AND raw HTML for schema.org data
         stock_status = classify_stock(page_text + " " + raw_html)
