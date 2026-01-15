@@ -973,16 +973,24 @@ def check_store_page(url, previous_products, stats):
                 prev_info = previous_products[product_url]
                 current_products[product_url]["last_alerted"] = prev_info.get("last_alerted")
                 
-                # CRITICAL: Preserve previous in_stock state - only update via verification
-                # extract_products() always marks non-preorders as False, which would
-                # cause false "restock" detections if we don't preserve the verified state
+                category_state = product_info.get("category_state", "unknown")
                 prev_in_stock = prev_info.get("in_stock", False)
-                current_products[product_url]["in_stock"] = prev_in_stock
+                
+                # Update in_stock based on category state:
+                # - "out" on category page = genuinely out of stock, set False
+                # - "in"/"preorder" = potentially in stock, preserve previous until verified
+                # - "unknown" = preserve previous state
+                if category_state == "out":
+                    # Category page shows OUT - product genuinely went out of stock
+                    current_products[product_url]["in_stock"] = False
+                else:
+                    # Category shows "in", "preorder", or "unknown" - preserve previous state
+                    # Verification will update to True if confirmed in stock
+                    current_products[product_url]["in_stock"] = prev_in_stock
                 
                 # Detect potential restocks:
                 # 1. Product was out of stock, now shows preorder (in_stock=True from category)
                 # 2. Product was out of stock, now shows "in" on category page (needs verification)
-                category_state = product_info.get("category_state", "unknown")
                 was_out = not prev_in_stock
                 
                 # Case 1: Became preorder (category marked it in_stock=True)
