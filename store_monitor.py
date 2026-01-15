@@ -1123,12 +1123,12 @@ def main():
                             
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
-                            # Persist verified stock state
+                            # Persist verified stock state - only set True, never reset to False
+                            # This prevents flaky sites from triggering repeated alerts
                             if product_url in state[url]:
                                 if confirmed_status in ("in", "preorder"):
                                     state[url][product_url]["in_stock"] = True
-                                else:
-                                    state[url][product_url]["in_stock"] = False
+                                # Don't set to False - preserve previous state to avoid alert loops
                             
                             if confirmed_status == "in":
                                 # Re-check cooldown before sending alert
