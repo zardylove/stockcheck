@@ -1074,33 +1074,47 @@ def main():
                             
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
-                            if confirmed_status == "in":
-                                franchise_changes += 1
-                                if change_type == "new":
-                                    message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
-                                    print(f"✅ IN STOCK!")
-                                else:
-                                    message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
-                                    print(f"✅ RESTOCKED!")
-                                send_alert(message, product_url)
-                                mark_alerted(url, product_url)
-                                if product_url in state[url]:
-                                    state[url][product_url]["last_alerted"] = datetime.now()
+                            # Persist verified stock state
+                            if product_url in state[url]:
+                                if confirmed_status in ("in", "preorder"):
                                     state[url][product_url]["in_stock"] = True
+                                else:
+                                    state[url][product_url]["in_stock"] = False
+                            
+                            if confirmed_status == "in":
+                                # Re-check cooldown before sending alert
+                                last_alerted = state[url][product_url].get("last_alerted") if product_url in state[url] else None
+                                if should_alert(last_alerted):
+                                    franchise_changes += 1
+                                    if change_type == "new":
+                                        message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
+                                        print(f"✅ IN STOCK!")
+                                    else:
+                                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
+                                        print(f"✅ RESTOCKED!")
+                                    send_alert(message, product_url)
+                                    mark_alerted(url, product_url)
+                                    if product_url in state[url]:
+                                        state[url][product_url]["last_alerted"] = datetime.now()
+                                else:
+                                    print(f"⏸️ IN STOCK (cooldown active)")
                                     
                             elif confirmed_status == "preorder":
-                                franchise_changes += 1
-                                message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
-                                print(f"📋 PREORDER!")
-                                send_alert(message, product_url)
-                                mark_alerted(url, product_url)
-                                if product_url in state[url]:
-                                    state[url][product_url]["last_alerted"] = datetime.now()
+                                # Re-check cooldown before sending alert
+                                last_alerted = state[url][product_url].get("last_alerted") if product_url in state[url] else None
+                                if should_alert(last_alerted):
+                                    franchise_changes += 1
+                                    message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
+                                    print(f"📋 PREORDER!")
+                                    send_alert(message, product_url)
+                                    mark_alerted(url, product_url)
+                                    if product_url in state[url]:
+                                        state[url][product_url]["last_alerted"] = datetime.now()
+                                else:
+                                    print(f"⏸️ PREORDER (cooldown active)")
                                     
                             elif confirmed_status == "out":
                                 print(f"❌ OUT OF STOCK (no alert)")
-                                if product_url in state[url]:
-                                    state[url][product_url]["in_stock"] = False
                                     
                             else:
                                 print(f"❓ UNKNOWN (no alert)")
@@ -1139,28 +1153,39 @@ def main():
                         if change and not first_run and not silence_alerts:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
                             time.sleep(1)
-                            verified_state, _ = check_direct_product(url, None, {"fetched": 0, "skipped": 0, "failed": 0})
+                            verified_state, _ = check_direct_product(url, direct_state.get(url), stats)
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
+                                
+                                # Persist verified stock state
                                 if verified_status in ("in", "preorder"):
-                                    franchise_changes += 1
-                                    change_type = change.get("type", "restock")
-                                    
-                                    if change_type == "preorder" or verified_status == "preorder":
-                                        message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
-                                        print(f"✅ PREORDER CONFIRMED!")
-                                    else:
-                                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
-                                        print(f"✅ RESTOCK CONFIRMED!")
-                                    
-                                    send_alert(message, change["url"])
-                                    direct_state[url]["last_alerted"] = datetime.now()
                                     direct_state[url]["in_stock"] = True
-                                    save_product(url, url, current_state.get("name"), True)
-                                    mark_alerted(url, url)
+                                else:
+                                    direct_state[url]["in_stock"] = False
+                                
+                                if verified_status in ("in", "preorder"):
+                                    # Re-check cooldown before sending alert
+                                    last_alerted = direct_state[url].get("last_alerted")
+                                    if should_alert(last_alerted):
+                                        franchise_changes += 1
+                                        change_type = change.get("type", "restock")
+                                        
+                                        if change_type == "preorder" or verified_status == "preorder":
+                                            message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
+                                            print(f"✅ PREORDER CONFIRMED!")
+                                        else:
+                                            message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
+                                            print(f"✅ RESTOCK CONFIRMED!")
+                                        
+                                        send_alert(message, change["url"])
+                                        direct_state[url]["last_alerted"] = datetime.now()
+                                        save_product(url, url, current_state.get("name"), True)
+                                        mark_alerted(url, url)
+                                    else:
+                                        print(f"⏸️ {verified_status.upper()} (cooldown active)")
+                                        save_product(url, url, current_state.get("name"), True)
                                 else:
                                     print(f"❌ Verification failed ({verified_status.upper()})")
-                                    direct_state[url]["in_stock"] = False
                                     save_product(url, url, current_state.get("name"), False)
                             else:
                                 print(f"❌ Verification failed (no response)")
