@@ -461,28 +461,6 @@ def should_alert(last_alerted):
     """
     return True
 
-def get_last_alerted_from_db(store_url, product_url):
-    """Check database for last_alerted timestamp of a product (for anti-flicker)."""
-    if not DATABASE_URL:
-        return None
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT last_alerted FROM product_state 
-            WHERE store_url = %s AND product_url = %s AND last_alerted IS NOT NULL
-            LIMIT 1
-        """, (store_url, product_url))
-        row = cur.fetchone()
-        cur.close()
-        return_db_connection(conn)
-        return row[0] if row else None
-    except Exception as e:
-        if conn:
-            return_db_connection(conn)
-        return None
-
 def is_url_initialized(store_url):
     """Check if a store or direct product has been seen before."""
     conn = None
