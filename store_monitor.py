@@ -536,20 +536,22 @@ def save_state(state):
         for store_url, products in state.items():
             for product_url, product_data in products.items():
                 if isinstance(product_data, dict):
-                    batch.append((store_url, product_url, product_data.get("name"), product_data.get("in_stock", True)))
+                    last_alerted = product_data.get("last_alerted")
+                    batch.append((store_url, product_url, product_data.get("name"), product_data.get("in_stock", True), last_alerted))
                 else:
-                    batch.append((store_url, product_url, None, True))
+                    batch.append((store_url, product_url, None, True, None))
         
         if batch:
             from psycopg2.extras import execute_values
             execute_values(cur, """
-                INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen)
+                INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen, last_alerted)
                 VALUES %s
                 ON CONFLICT (store_url, product_url) 
                 DO UPDATE SET product_name = EXCLUDED.product_name, 
                               in_stock = EXCLUDED.in_stock,
-                              last_seen = CURRENT_TIMESTAMP
-            """, batch, template="(%s, %s, %s, %s, CURRENT_TIMESTAMP)")
+                              last_seen = CURRENT_TIMESTAMP,
+                              last_alerted = COALESCE(EXCLUDED.last_alerted, product_state.last_alerted)
+            """, batch, template="(%s, %s, %s, %s, CURRENT_TIMESTAMP, %s)")
             conn.commit()
         
         cur.close()
