@@ -285,12 +285,24 @@ def classify_stock(text):
     Returns: 'preorder', 'out', 'in', or 'unknown'
     
     Strategy:
-    1. Check for authoritative schema.org/JSON data (highest priority)
-    2. Then use position-based detection for visible content
+    1. Filter out JavaScript template/config strings that cause false positives
+    2. Check for authoritative schema.org/JSON data (highest priority)
+    3. Then use position-based detection for visible content
     """
     # Normalize whitespace
     text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
     text_normalized = ' '.join(text_normalized.split())
+    
+    # Remove JavaScript configuration strings that cause false positives
+    # These are template strings like: productFormSoldOut: "Sold out"
+    # Pattern matches: word: "text" or word: 'text' (JS object properties)
+    js_config_pattern = re.compile(r'\b\w+(?:Form|Button|Text|Label|Message)(?:SoldOut|OutOfStock|AddToCart|PreOrder|InStock)["\']?\s*[:=]\s*["\'][^"\']+["\']', re.IGNORECASE)
+    text_normalized = js_config_pattern.sub('', text_normalized)
+    
+    # Also remove generic JS object patterns for stock terms: "key": "Sold out"
+    js_object_pattern = re.compile(r'["\']?\w+["\']?\s*:\s*["\'](?:sold out|out of stock|add to cart|pre-order|in stock)["\']', re.IGNORECASE)
+    text_normalized = js_object_pattern.sub('', text_normalized)
+    
     text_lower = text_normalized.lower()
     
     # PRIORITY 1: Check for authoritative structured data (schema.org, JSON)
