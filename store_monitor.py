@@ -50,6 +50,12 @@ FAILURE_COOLDOWN_MINUTES = 3
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
 JS_SKIP_MINUTES = 5
 
+# === OPTIMIZATION: Verified-out product cache ===
+# When a product is verified as OUT, cache it so we don't re-verify every cycle
+# Key: product_url, Value: timestamp when verified out
+VERIFIED_OUT_CACHE = {}
+VERIFIED_OUT_MINUTES = 30  # Re-verify after 30 minutes
+
 # URL patterns that indicate JavaScript-only pages
 JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
 
@@ -366,6 +372,24 @@ def is_in_js_skip_cache(url):
 def add_to_js_skip_cache(url):
     """Add URL to JS skip cache."""
     JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
+
+def is_verified_out(product_url):
+    """Check if product was recently verified as out-of-stock."""
+    if product_url not in VERIFIED_OUT_CACHE:
+        return False
+    if datetime.now() < VERIFIED_OUT_CACHE[product_url]:
+        return True
+    del VERIFIED_OUT_CACHE[product_url]
+    return False
+
+def mark_verified_out(product_url):
+    """Mark product as verified out-of-stock (don't re-verify for a while)."""
+    VERIFIED_OUT_CACHE[product_url] = datetime.now() + timedelta(minutes=VERIFIED_OUT_MINUTES)
+
+def clear_verified_out(product_url):
+    """Clear verified-out status when product becomes in-stock."""
+    if product_url in VERIFIED_OUT_CACHE:
+        del VERIFIED_OUT_CACHE[product_url]
 
 def load_urls(file_path="PokeWebsites.txt"):
     try:
@@ -1105,20 +1129,25 @@ def main():
                             change_type = change["type"]
                             category_name = change["name"][:50]
                             
+                            # Skip if already verified as out-of-stock recently
+                            if is_verified_out(product_url):
+                                print(f"    ⏭️ Skipping: {category_name}... (recently verified OUT)")
+                                continue
+                            
                             print(f"    🔍 Verifying: {category_name}...", end=" ")
                             confirmed_status, confirmed_name = confirm_product_stock(product_url)
                             
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
-                            # Persist verified stock state - only set True, never reset to False
-                            # This prevents flaky sites from triggering repeated alerts
+                            # Persist verified stock state
                             if product_url in state[url]:
                                 if confirmed_status in ("in", "preorder"):
                                     state[url][product_url]["in_stock"] = True
-                                # Don't set to False - preserve previous state to avoid alert loops
+                                    clear_verified_out(product_url)  # Clear out-of-stock cache
                             
                             if confirmed_status == "in":
                                 franchise_changes += 1
+                                clear_verified_out(product_url)
                                 if change_type == "new":
                                     message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
                                     print(f"✅ IN STOCK!")
@@ -1132,6 +1161,7 @@ def main():
                                     
                             elif confirmed_status == "preorder":
                                 franchise_changes += 1
+                                clear_verified_out(product_url)
                                 message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
                                 print(f"📋 PREORDER!")
                                 send_alert(message, product_url)
@@ -1140,9 +1170,11 @@ def main():
                                     state[url][product_url]["last_alerted"] = datetime.now()
                                     
                             elif confirmed_status == "out":
+                                mark_verified_out(product_url)  # Cache as verified OUT
                                 print(f"❌ OUT OF STOCK (no alert)")
                                     
                             else:
+                                mark_verified_out(product_url)  # Also cache unknown to prevent spam
                                 print(f"❓ UNKNOWN (no alert)")
                             
                             time.sleep(1)
