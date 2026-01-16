@@ -541,9 +541,18 @@ def get_headers_for_url(url):
     mobile_sites = [
         "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
         "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
-        "johnlewis.com", "hamleys.com"
+        "johnlewis.com", "hamleys.com",
+        "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
+        "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
+        "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
+        "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
+        "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
+        "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
+        "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
+        "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
+        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk"
     ]
-    if any(site in url for site in mobile_sites):
+    if any(site in url.lower() for site in mobile_sites):
         return MOBILE_HEADERS
     return HEADERS
 
@@ -918,15 +927,14 @@ def check_store_page(url, previous_products, stats):
             stats['skipped'] += 1
             return previous_products, []
         
-        is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
-        
-        if is_shopify_antibot and prev_count > 0 and curr_count < prev_count:
-            print(f"⚠️ BLOCKED ({curr_count} vs {prev_count} cached, Shopify anti-bot)")
-            return previous_products, []
-        
-        if prev_count >= 5 and curr_count < prev_count * 0.3:
-            print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
-            return previous_products, []
+        # Anti-bot cache reversion disabled - allow detection of new products even with fewer results
+        # is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
+        # if is_shopify_antibot and prev_count > 0 and curr_count < prev_count:
+        #     print(f"⚠️ BLOCKED ({curr_count} vs {prev_count} cached, Shopify anti-bot)")
+        #     return previous_products, []
+        # if prev_count >= 5 and curr_count < prev_count * 0.3:
+        #     print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
+        #     return previous_products, []
         
         changes = []
         

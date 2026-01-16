@@ -1,0 +1,478 @@
+import requests
+from bs4 import BeautifulSoup
+import time
+import os
+import random
+import json
+import re
+import psycopg2
+from psycopg2 import pool
+import traceback
+from urllib.parse import urljoin, urlparse, urlunparse
+from datetime import datetime, timedelta
+
+# === DATABASE CONNECTION POOL ===
+DB_POOL = None
+MAX_TIMEOUT = 60  # Global max timeout cap
+IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# === FRANCHISE CONFIGURATIONS ===
+FRANCHISES = [
+    {
+        "name": "Pokemon",
+        "store_file": "PokeWebsites.txt",
+        "direct_file": "PokeDirectProducts.txt",
+        "webhook": os.getenv("POKESTOCK")
+    },
+    {
+        "name": "One Piece",
+        "store_file": "OPWebsites.txt",
+        "direct_file": "OPDirectProducts.txt",
+        "webhook": os.getenv("OPSTOCK")
+    }
+]
+
+# Current webhook for the active franchise (set during scanning)
+CURRENT_WEBHOOK = None
+
+# === OPTIMIZATION: Reusable session with better headers ===
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1"
+})
+
+# === OPTIMIZATION: Failed site cache (skip for 3 minutes) ===
+FAILED_SITES = {}  # {url: failure_time}
+FAILURE_COOLDOWN_MINUTES = 3
+
+# === OPTIMIZATION: JS/Dynamic page skip cache ===
+JS_SKIP_CACHE = {}  # {url: skip_until_time}
+JS_SKIP_MINUTES = 5
+
+# URL patterns that indicate JavaScript-only pages
+JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
+
+# HTML content that indicates JS-only rendering
+JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder', 
+                      'please enable javascript', 'browser does not support']
+
+# === PRODUCT TYPE FILTERING (block non-TCG items) ===
+BLOCK_KEYWORDS = [
+    "plush", "plushie", "figure", "toy",
+    "mug", "cup", "glass",
+    "poster", "art", "canvas",
+    "postcard", "stationery",
+    "clothing", "hoodie", "t-shirt", "shirt",
+    "bag", "backpack",
+    "keyring", "keychain",
+    "playmat",
+    "dice", "coin",
+    "notebook", "binder",
+    "squishmallow", "cushion", "pillow",
+    "lamp", "light", "clock",
+    "wallet", "purse",
+    "lunchbox", "water bottle",
+    "blanket", "towel",
+    "hat", "cap", "beanie",
+    "socks", "slippers",
+    "puzzle", "jigsaw", "challenge",
+    "funko", "pop!", "sleeves", "portfolio", "accessories", "event",
+]
+
+def is_tcg_product(name: str, url: str = "") -> bool:
+    text = f"{name} {url}".lower()
+    for word in BLOCK_KEYWORDS:
+        if word in text:
+            return False
+    return True
+
+# === STORE UNAVAILABILITY DETECTION ===
+STORE_UNAVAILABLE_MARKERS = [
+    "enter using password", "password protected", "store closed",
+    "temporarily closed", "temporarily unavailable", "site is unavailable",
+    "maintenance mode", "under maintenance", "we'll be back soon",
+    "coming back soon", "closed until", "currently unavailable",
+    "are you the store owner", "admin login", "restricted access"
+]
+
+def is_store_unavailable(text: str) -> bool:
+    if not text:
+        return False
+    text = text.lower()
+    return any(marker in text for marker in STORE_UNAVAILABLE_MARKERS)
+
+SHOPIFY_STORES_WITH_ANTIBOT = [
+    "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
+    "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
+    "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
+    "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
+    "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
+    "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
+    "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
+    "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
+    "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk",
+]
+
+def init_db_pool():
+    global DB_POOL
+    print(f"🔌 Checking database connection...")
+    if not DATABASE_URL:
+        print("❌ DATABASE_URL not found! Database features disabled.")
+        return False
+    if DB_POOL is None:
+        try:
+            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL, connect_timeout=10)
+            print("✅ Database pool initialized")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to create connection pool: {e}")
+            traceback.print_exc()
+            return False
+    return True
+
+def get_db_connection():
+    global DB_POOL
+    if DB_POOL:
+        return DB_POOL.getconn()
+    return psycopg2.connect(DATABASE_URL)
+
+def return_db_connection(conn):
+    global DB_POOL
+    if DB_POOL and conn:
+        DB_POOL.putconn(conn)
+    elif conn:
+        conn.close()
+
+def init_database():
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS product_state (
+                store_url TEXT NOT NULL,
+                product_url TEXT NOT NULL,
+                product_name TEXT,
+                in_stock BOOLEAN DEFAULT TRUE,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_alerted TIMESTAMP,
+                PRIMARY KEY (store_url, product_url)
+            )
+        """)
+        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_alerted TIMESTAMP")
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+        print("✅ Database initialized")
+        return True
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        if conn:
+            return_db_connection(conn)
+        return False
+
+def normalize_product_url(url):
+    try:
+        parsed = urlparse(url)
+        path = parsed.path.rstrip('/')
+        if not path:
+            return None
+        normalized = urlunparse((parsed.scheme, parsed.netloc.lower(), path, '', '', ''))
+        return normalized
+    except:
+        return url
+
+CHECK_INTERVAL = 0  # Set your desired interval here (seconds)
+
+HEADERS = SESSION.headers  # Use the session headers
+
+MOBILE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
+}
+
+# === STOCK CLASSIFICATION TERMS ===
+PREORDER_TERMS = [
+    "pre-order now", "preorder now", "available for pre-order", "available for preorder",
+    "pre order now", "add to pre-order", "expected release", "expected dispatch",
+    "releasing soon", "available from", "releases on", "presale", "pre-sale",
+    "preorder available", "pre-order available"
+]
+
+OUT_OF_STOCK_TERMS = [
+    "sold out", "out of stock", "unavailable", "notify when available",
+    "currently unavailable", "temporarily out of stock", "not in stock",
+    "no stock available", "stock: 0", "notify me when in stock", "out-of-stock",
+    "soldout", "backorder", "back order", "waitlist", "wait list",
+    "notify me", "email when available", "outofstock", "schema.org/outofstock",
+    "check back soon", "sold-out-btn", "notify me when", "register interest",
+    "item unavailable", "coming soon", "releases in", "will be in stock on"
+]
+
+IN_STOCK_TERMS = [
+    "add to cart", "add to basket", "add to bag", "add to trolley",
+    "add to order", "in stock", "available now", "available to buy",
+    "buy now", "order now", "item in stock", "stock available",
+    "stock: available", "instock", "in-stock", "add to shopping bag",
+    "add to shopping cart", "purchase now", "get it now",
+    "ready to ship", "ships today", "in stock now",
+    "only a few left", "low stock", "limited stock", "few remaining"
+]
+
+PREORDER_PATTERN = re.compile('|'.join(re.escape(term) for term in PREORDER_TERMS), re.IGNORECASE)
+OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
+IN_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TERMS), re.IGNORECASE)
+
+def classify_stock(text):
+    text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
+    text_normalized = ' '.join(text_normalized.split())
+    text_lower = text_normalized.lower()
+
+    authoritative_out_terms = [
+        "schema.org/outofstock", '"availability":"outofstock"', '"availability": "outofstock"',
+        '"availability":"out of stock"', '"availability": "out of stock"',
+        '"stock_status":"outofstock"', '"stock_status": "outofstock"',
+        "currently unavailable."
+    ]
+    for term in authoritative_out_terms:
+        if term in text_lower:
+            return "out"
+
+    out_match = OUT_OF_STOCK_PATTERN.search(text_lower)
+    in_match = IN_STOCK_PATTERN.search(text_lower)
+    preorder_match = PREORDER_PATTERN.search(text_lower)
+
+    matches = []
+    if out_match: matches.append(('out', out_match.start()))
+    if in_match: matches.append(('in', in_match.start()))
+    if preorder_match: matches.append(('preorder', preorder_match.start()))
+
+    if not matches:
+        return "unknown"
+
+    matches.sort(key=lambda x: x[1])
+    first_status = matches[0][0]
+
+    if first_status == 'in' and out_match:
+        if out_match.start() - in_match.start() < 500:
+            return "out"
+
+    return first_status
+
+def is_site_in_failure_cooldown(url):
+    if url not in FAILED_SITES:
+        return False
+    failure_time = FAILED_SITES[url]
+    if datetime.now() - failure_time < timedelta(minutes=FAILURE_COOLDOWN_MINUTES):
+        return True
+    del FAILED_SITES[url]
+    return False
+
+def mark_site_failed(url):
+    FAILED_SITES[url] = datetime.now()
+
+def is_js_only_url(url):
+    return any(pattern in url.lower() for pattern in JS_URL_PATTERNS)
+
+def is_js_only_page(html_content, product_count):
+    if len(html_content) < 2000 and product_count < 3:
+        return True
+    html_lower = html_content.lower()
+    return any(indicator in html_lower for indicator in JS_PAGE_INDICATORS)
+
+def is_in_js_skip_cache(url):
+    if url not in JS_SKIP_CACHE:
+        return False
+    if datetime.now() < JS_SKIP_CACHE[url]:
+        return True
+    del JS_SKIP_CACHE[url]
+    return False
+
+def add_to_js_skip_cache(url):
+    JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
+
+def load_urls(file_path):
+    try:
+        with open(file_path, "r") as f:
+            urls = [line.strip() for line in f if line.strip() and line.strip().startswith("http")]
+        return urls
+    except FileNotFoundError:
+        print(f"Error: {file_path} not found")
+        return []
+
+# ... (keep all your existing database functions: load_state, save_product, mark_alerted, etc.)
+# I'm skipping repeating them here to save space - keep them as they were in your original code
+
+def get_headers_for_url(url):
+    # Expanded mobile list to include anti-bot sites
+    mobile_sites = [
+        "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
+        "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
+        "johnlewis.com", "hamleys.com",
+        # Anti-bot Shopify sites
+        "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
+        "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
+        "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
+        "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
+        "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
+        "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
+        "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
+        "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
+        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk"
+    ]
+    if any(site in url.lower() for site in mobile_sites):
+        return MOBILE_HEADERS
+    return HEADERS
+
+def send_alert(message, url, webhook=None):
+    webhook_url = webhook or CURRENT_WEBHOOK
+    if not webhook_url:
+        print("Warning: Webhook not configured")
+        return
+    data = {"content": f"🚨 **STOCK ALERT** 🚨\n{message}\n{url}"}
+    try:
+        r = requests.post(webhook_url, json=data, timeout=10)
+        if r.status_code == 204:
+            print(f"✅ Alert sent!")
+        else:
+            print(f"⚠️ Failed to send alert ({r.status_code})")
+    except Exception as e:
+        print(f"❌ Discord error: {e}")
+
+def confirm_product_stock(product_url):
+    try:
+        headers = get_headers_for_url(product_url)
+        timeout = get_timeout_for_url(product_url)
+        r = SESSION.get(product_url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
+        
+        if r.status_code != 200:
+            return "unknown", None
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        page_text = soup.get_text()
+        raw_html = r.text
+        
+        product_name = None
+        title_tag = soup.find('title')
+        if title_tag:
+            product_name = title_tag.get_text(strip=True)[:100]
+        if not product_name:
+            h1 = soup.find('h1')
+            if h1:
+                product_name = h1.get_text(strip=True)[:100]
+        
+        if is_store_unavailable(page_text):
+            print("⚠️ Store unavailable/maintenance – treating as OUT")
+            return "out", product_name
+        
+        stock_status = classify_stock(page_text + " " + raw_html)
+        return stock_status, product_name
+        
+    except Exception as e:
+        print(f"Error confirming stock {product_url}: {e}")
+        return "unknown", None
+
+def get_timeout_for_url(url):
+    slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
+    return 30 if any(site in url for site in slow_sites) else 15
+
+# Keep your existing extract_products, check_direct_product, check_store_page, etc.
+# Only showing the modified check_store_page with debug logging + commented anti-bot logic
+
+def check_store_page(url, previous_products, stats):
+    if is_js_only_url(url):
+        print(f"⏭️ SKIPPED (JS-only URL pattern)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
+    if is_in_js_skip_cache(url):
+        print(f"⏭️ SKIPPED (JS page, cached)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
+    if is_site_in_failure_cooldown(url):
+        print(f"⏭️ SKIPPED (failed recently)")
+        stats['skipped'] += 1
+        return previous_products, []
+    
+    try:
+        headers = get_headers_for_url(url)
+        timeout = get_timeout_for_url(url)
+        r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
+        stats['fetched'] += 1
+        
+        # ──────────────── DEBUG LOGGING ────────────────
+        print(f"DEBUG: Fetched {urlparse(url).netloc} - Status: {r.status_code}, "
+              f"Content length: {len(r.text):,} bytes")
+        
+        if r.status_code != 200:
+            print(f"⚠️ Failed (status {r.status_code})")
+            mark_site_failed(url)
+            stats['failed'] += 1
+            return previous_products, []
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        current_products = extract_products(soup, url)
+        
+        print(f"DEBUG: Found {len(current_products)} products on this fetch")
+        
+        prev_count = len(previous_products)
+        curr_count = len(current_products)
+        
+        if is_js_only_page(r.text, curr_count) and prev_count == 0:
+            print(f"⏭️ JS-ONLY PAGE (adding to skip cache)")
+            add_to_js_skip_cache(url)
+            stats['skipped'] += 1
+            return previous_products, []
+        
+        # ──────────────── COMMENTED OUT ANTI-BOT REVERT ────────────────
+        # is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
+        # if is_shopify_antibot and prev_count > 0 and curr_count < prev_count:
+        #     print(f"⚠️ BLOCKED ({curr_count} vs {prev_count} cached, Shopify anti-bot)")
+        #     return previous_products, []
+        #
+        # if prev_count >= 5 and curr_count < prev_count * 0.3:
+        #     print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
+        #     return previous_products, []
+        
+        # Rest of your original check_store_page logic here...
+        # (changes detection, etc.)
+        # For brevity I'm not repeating the full function body again -
+        # keep your original logic from "changes = []" onwards
+
+        changes = []  # ← your original changes logic goes here
+        
+        return current_products, changes
+        
+    except requests.exceptions.Timeout:
+        print(f"⏱️ TIMEOUT")
+        mark_site_failed(url)
+        stats['failed'] += 1
+        return previous_products, []
+    except Exception as e:
+        print(f"❌ Unexpected error during scan: {e}")
+        traceback.print_exc()
+        mark_site_failed(url)
+        stats['failed'] += 1
+        return previous_products, []
+
+# Keep your main() function as it was, just make sure CHECK_INTERVAL is set to something useful
+# e.g. CHECK_INTERVAL = 300  # 5 minutes
+
+if __name__ == "__main__":
+    main()
