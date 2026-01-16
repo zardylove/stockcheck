@@ -758,6 +758,123 @@ def get_category_id_from_url(url):
         return match.group(1)
     return None
 
+# === SHOPIFY FALLBACK DISCOVERY ===
+def is_shopify_store(url):
+    """Check if URL is likely a Shopify store."""
+    shopify_indicators = ['/collections/', '/products/', 'myshopify.com']
+    return any(indicator in url.lower() for indicator in shopify_indicators) or \
+           any(store in url.lower() for store in SHOPIFY_STORES_WITH_ANTIBOT)
+
+def fetch_shopify_products_json(base_url):
+    """Try to fetch products from Shopify products.json API (collection-specific if possible)."""
+    try:
+        parsed = urlparse(base_url)
+        
+        # Try collection-specific endpoint first if URL has /collections/
+        collection_match = re.search(r'/collections/([^/?]+)', base_url)
+        if collection_match:
+            collection_handle = collection_match.group(1)
+            products_url = f"{parsed.scheme}://{parsed.netloc}/collections/{collection_handle}/products.json?limit=250"
+        else:
+            products_url = f"{parsed.scheme}://{parsed.netloc}/products.json?limit=250"
+        
+        headers = get_headers_for_url(base_url)
+        r = SESSION.get(products_url, headers=headers, timeout=15)
+        
+        if r.status_code != 200:
+            return None
+        
+        data = r.json()
+        products = {}
+        
+        for product in data.get('products', []):
+            product_handle = product.get('handle', '')
+            product_title = product.get('title', '')
+            
+            if not product_handle or not product_title:
+                continue
+            
+            if not is_tcg_product(product_title, product_handle):
+                continue
+            
+            product_url = f"{parsed.scheme}://{parsed.netloc}/products/{product_handle}"
+            normalized_url = normalize_product_url(product_url)
+            
+            if normalized_url:
+                available = any(v.get('available', False) for v in product.get('variants', []))
+                products[normalized_url] = {
+                    "name": product_title[:100],
+                    "in_stock": available,
+                    "category_state": "in" if available else "out"
+                }
+        
+        return products if products else None
+    except Exception as e:
+        return None
+
+def fetch_shopify_sitemap_products(base_url):
+    """Try to fetch products from Shopify sitemap."""
+    try:
+        parsed = urlparse(base_url)
+        sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap_products_1.xml"
+        
+        headers = get_headers_for_url(base_url)
+        r = SESSION.get(sitemap_url, headers=headers, timeout=15)
+        
+        if r.status_code != 200:
+            return None
+        
+        soup = BeautifulSoup(r.text, 'xml')
+        products = {}
+        
+        for url_tag in soup.find_all('url'):
+            loc = url_tag.find('loc')
+            if not loc:
+                continue
+            
+            product_url = loc.get_text(strip=True)
+            if '/products/' not in product_url:
+                continue
+            
+            image_title = url_tag.find('image:title')
+            product_name = image_title.get_text(strip=True) if image_title else ""
+            
+            if not product_name:
+                product_name = product_url.split('/products/')[-1].replace('-', ' ').title()
+            
+            if not is_tcg_product(product_name, product_url):
+                continue
+            
+            normalized_url = normalize_product_url(product_url)
+            if normalized_url and normalized_url not in products:
+                products[normalized_url] = {
+                    "name": product_name[:100],
+                    "in_stock": False,
+                    "category_state": "unknown"
+                }
+        
+        return products if products else None
+    except Exception as e:
+        return None
+
+def shopify_fallback_discovery(base_url, html_products_count):
+    """
+    Fallback discovery for Shopify stores when collection HTML looks incomplete.
+    Returns additional products found via products.json or sitemap.
+    """
+    if not is_shopify_store(base_url):
+        return None
+    
+    products_json = fetch_shopify_products_json(base_url)
+    if products_json and len(products_json) > html_products_count:
+        return products_json
+    
+    sitemap_products = fetch_shopify_sitemap_products(base_url)
+    if sitemap_products and len(sitemap_products) > html_products_count:
+        return sitemap_products
+    
+    return None
+
 def is_product_url(url, base_url):
     if not url.startswith("http"):
         return False
@@ -945,14 +1062,22 @@ def check_store_page(url, previous_products, stats):
             stats['skipped'] += 1
             return previous_products, []
         
-        # Anti-bot cache reversion disabled - allow detection of new products even with fewer results
-        # is_shopify_antibot = any(store in url for store in SHOPIFY_STORES_WITH_ANTIBOT)
-        # if is_shopify_antibot and prev_count > 0 and curr_count < prev_count:
-        #     print(f"⚠️ BLOCKED ({curr_count} vs {prev_count} cached, Shopify anti-bot)")
-        #     return previous_products, []
-        # if prev_count >= 5 and curr_count < prev_count * 0.3:
-        #     print(f"⚠️ BLOCKED ({curr_count} products vs {prev_count} cached, keeping cache)")
-        #     return previous_products, []
+        # === SHOPIFY FALLBACK DISCOVERY ===
+        # If collection HTML looks incomplete/blocked, try products.json or sitemap
+        looks_blocked = (prev_count > 0 and curr_count < prev_count * 0.5) or curr_count == 0
+        if looks_blocked and is_shopify_store(url):
+            print(f"🔄 FALLBACK", end=" ")
+            fallback_products = shopify_fallback_discovery(url, curr_count)
+            if fallback_products:
+                # Merge fallback with HTML results (fallback takes precedence for stock status)
+                for purl, pinfo in fallback_products.items():
+                    if purl not in current_products:
+                        current_products[purl] = pinfo
+                    elif pinfo.get("in_stock") and not current_products[purl].get("in_stock"):
+                        current_products[purl]["in_stock"] = True
+                        current_products[purl]["category_state"] = pinfo.get("category_state", "in")
+                curr_count = len(current_products)
+                print(f"({curr_count} products via API)", end=" ")
         
         changes = []
         
