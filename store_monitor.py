@@ -772,8 +772,9 @@ def fetch_shopify_products_json(base_url):
         
         # Try collection-specific endpoint first if URL has /collections/
         collection_match = re.search(r'/collections/([^/?]+)', base_url)
-        if collection_match:
-            collection_handle = collection_match.group(1)
+        collection_handle = collection_match.group(1) if collection_match else None
+        
+        if collection_handle:
             products_url = f"{parsed.scheme}://{parsed.netloc}/collections/{collection_handle}/products.json?limit=250"
         else:
             products_url = f"{parsed.scheme}://{parsed.netloc}/products.json?limit=250"
@@ -797,7 +798,11 @@ def fetch_shopify_products_json(base_url):
             if not is_tcg_product(product_title, product_handle):
                 continue
             
-            product_url = f"{parsed.scheme}://{parsed.netloc}/products/{product_handle}"
+            # Include collection path in URL to match HTML-scraped URLs
+            if collection_handle:
+                product_url = f"{parsed.scheme}://{parsed.netloc}/collections/{collection_handle}/products/{product_handle}"
+            else:
+                product_url = f"{parsed.scheme}://{parsed.netloc}/products/{product_handle}"
             normalized_url = normalize_product_url(product_url)
             
             if normalized_url:
