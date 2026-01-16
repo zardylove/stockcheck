@@ -52,9 +52,9 @@ JS_SKIP_MINUTES = 5
 
 # === OPTIMIZATION: Verified-out product cache ===
 # When a product is verified as OUT, cache it so we don't re-verify every cycle
-# Key: product_url, Value: timestamp when verified out
-VERIFIED_OUT_CACHE = {}
-VERIFIED_OUT_MINUTES = 30  # Re-verify after 30 minutes
+# Only clears when product is verified IN-STOCK or disappears and reappears
+# Key: product_url, Value: True (no expiration)
+VERIFIED_OUT_CACHE = set()
 
 # URL patterns that indicate JavaScript-only pages
 JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
@@ -374,22 +374,16 @@ def add_to_js_skip_cache(url):
     JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
 
 def is_verified_out(product_url):
-    """Check if product was recently verified as out-of-stock."""
-    if product_url not in VERIFIED_OUT_CACHE:
-        return False
-    if datetime.now() < VERIFIED_OUT_CACHE[product_url]:
-        return True
-    del VERIFIED_OUT_CACHE[product_url]
-    return False
+    """Check if product was verified as out-of-stock (no expiration)."""
+    return product_url in VERIFIED_OUT_CACHE
 
 def mark_verified_out(product_url):
-    """Mark product as verified out-of-stock (don't re-verify for a while)."""
-    VERIFIED_OUT_CACHE[product_url] = datetime.now() + timedelta(minutes=VERIFIED_OUT_MINUTES)
+    """Mark product as verified out-of-stock (persists until cleared)."""
+    VERIFIED_OUT_CACHE.add(product_url)
 
 def clear_verified_out(product_url):
     """Clear verified-out status when product becomes in-stock."""
-    if product_url in VERIFIED_OUT_CACHE:
-        del VERIFIED_OUT_CACHE[product_url]
+    VERIFIED_OUT_CACHE.discard(product_url)
 
 def load_urls(file_path="PokeWebsites.txt"):
     try:
