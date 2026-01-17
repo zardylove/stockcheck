@@ -23,15 +23,20 @@ FRANCHISES = [
         "name": "Pokemon",
         "store_file": "PokeWebsites.txt",
         "direct_file": "PokeDirectProducts.txt",
-        "webhook": os.getenv("POKESTOCK")
+        "webhook": os.getenv("POKESTOCK"),
+        "role_id": "1462134905067802704"
     },
     {
         "name": "One Piece",
         "store_file": "OPWebsites.txt",
         "direct_file": "OPDirectProducts.txt",
-        "webhook": os.getenv("OPSTOCK")
+        "webhook": os.getenv("OPSTOCK"),
+        "role_id": "1462136572211101819"
     }
 ]
+
+# Current franchise info for alerts
+CURRENT_FRANCHISE = None
 
 # Current webhook for the active franchise (set during scanning)
 CURRENT_WEBHOOK = None
@@ -586,28 +591,79 @@ def get_headers_for_url(url):
         return MOBILE_HEADERS
     return HEADERS
 
-def send_alert(message, url, webhook=None):
+def send_alert(product_name, url, store_name, is_preorder=False, is_new=False, 
+               image_url=None, price=None, webhook=None):
+    """
+    Send a rich Discord embed alert with role ping.
+    """
     webhook_url = webhook or CURRENT_WEBHOOK
     if not webhook_url:
         print("Warning: Webhook not configured for this franchise")
         return
     
-    data = {
-        "content": f"🚨 **STOCK ALERT** 🚨\n{message}\n{url}"
+    # Get role ID for current franchise
+    role_id = CURRENT_FRANCHISE.get("role_id") if CURRENT_FRANCHISE else None
+    franchise_name = CURRENT_FRANCHISE.get("name", "TCG") if CURRENT_FRANCHISE else "TCG"
+    
+    # Determine alert type and colors
+    if is_preorder:
+        title = f"PREORDER AVAILABLE - {product_name}"
+        status = "Preorder"
+        color = 16753920  # Orange
+        emoji = "📋"
+    elif is_new:
+        title = f"NEW PRODUCT - {product_name}"
+        status = "In Stock"
+        color = 3447003  # Blue
+        emoji = "🆕"
+    else:
+        title = f"BACK IN STOCK - {product_name}"
+        status = "In Stock"
+        color = 65280  # Green
+        emoji = "📦"
+    
+    # Build role mention
+    role_mention = f"<@&{role_id}>" if role_id else ""
+    
+    # Build embed
+    embed = {
+        "title": title,
+        "url": url,
+        "color": color,
+        "fields": [
+            {"name": "Retailer", "value": store_name, "inline": True},
+            {"name": "Price", "value": price or "N/A", "inline": True},
+            {"name": "Status", "value": status, "inline": True},
+            {"name": "Direct Link", "value": f"[Click Here]({url})", "inline": False}
+        ],
+        "footer": {"text": f"{franchise_name} Restocks Monitor"},
+        "timestamp": datetime.utcnow().isoformat()
     }
+    
+    # Add thumbnail if image available
+    if image_url:
+        embed["thumbnail"] = {"url": image_url}
+    
+    # Build payload with role ping in content
+    data = {
+        "content": f"{emoji} **RESTOCK** - {product_name} @{store_name} {role_mention}",
+        "embeds": [embed],
+        "allowed_mentions": {"parse": ["roles"]}
+    }
+    
     try:
         r = requests.post(webhook_url, json=data, timeout=10)
         if r.status_code == 204:
             print(f"✅ Alert sent!")
         else:
-            print(f"⚠️ Failed to send alert ({r.status_code})")
+            print(f"⚠️ Failed to send alert ({r.status_code}): {r.text}")
     except Exception as e:
         print(f"❌ Discord error: {e}")
 
 def confirm_product_stock(product_url):
     """
     Fetch the actual product page to confirm stock status.
-    Returns: ('in', 'preorder', 'out', 'unknown') and product name
+    Returns: (stock_status, product_name, image_url, price)
     
     This eliminates false positives from category page detection.
     """
@@ -617,13 +673,13 @@ def confirm_product_stock(product_url):
         r = SESSION.get(product_url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
         
         if r.status_code != 200:
-            return "unknown", None
+            return "unknown", None, None, None
         
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
         raw_html = r.text
         
-        # Extract product name first (needed for return)
+        # Extract product name
         product_name = None
         title_tag = soup.find('title')
         if title_tag:
@@ -633,18 +689,76 @@ def confirm_product_stock(product_url):
             if h1:
                 product_name = h1.get_text(strip=True)[:100]
         
+        # Extract product image URL
+        image_url = None
+        img_selectors = [
+            'img.product-featured-image', 'img.product-image', 'img.product__image',
+            'img[class*="product"]', 'img[class*="gallery"]', 'img[class*="main"]',
+            '.product-image img', '.product-photo img', '.gallery img',
+            '#product-image img', '.product-single__photo img',
+            'meta[property="og:image"]', 'meta[name="og:image"]'
+        ]
+        for selector in img_selectors:
+            try:
+                elem = soup.select_one(selector)
+                if elem:
+                    if elem.name == 'meta':
+                        image_url = elem.get('content')
+                    else:
+                        image_url = elem.get('src') or elem.get('data-src')
+                    if image_url:
+                        if image_url.startswith('//'):
+                            image_url = 'https:' + image_url
+                        elif image_url.startswith('/'):
+                            parsed = urlparse(product_url)
+                            image_url = f"{parsed.scheme}://{parsed.netloc}{image_url}"
+                        break
+            except:
+                continue
+        
+        # Extract price
+        price = None
+        price_patterns = [
+            r'£[\d,]+\.?\d*', r'\$[\d,]+\.?\d*', r'€[\d,]+\.?\d*'
+        ]
+        price_selectors = [
+            '.price', '.product-price', '.current-price', '[class*="price"]',
+            'meta[property="product:price:amount"]', 'meta[property="og:price:amount"]',
+            '.money', 'span.money'
+        ]
+        for selector in price_selectors:
+            try:
+                elem = soup.select_one(selector)
+                if elem:
+                    if elem.name == 'meta':
+                        price_val = elem.get('content')
+                        if price_val:
+                            price = f"£{price_val}"
+                            break
+                    else:
+                        price_text = elem.get_text(strip=True)
+                        for pattern in price_patterns:
+                            match = re.search(pattern, price_text)
+                            if match:
+                                price = match.group()
+                                break
+                        if price:
+                            break
+            except:
+                continue
+        
         # Block alerts if store is unavailable / maintenance / password protected
         if is_store_unavailable(page_text):
             print("⚠️ Store unavailable/maintenance – treating as OUT")
-            return "out", product_name
+            return "out", product_name, image_url, price
         
         # Classify stock status - check both visible text AND raw HTML for schema.org data
         stock_status = classify_stock(page_text + " " + raw_html)
         
-        return stock_status, product_name
+        return stock_status, product_name, image_url, price
         
     except Exception as e:
-        return "unknown", None
+        return "unknown", None, None, None
 
 def get_product_card_text(link):
     card_text = ""
@@ -1215,8 +1329,10 @@ def main():
         
         # === SCAN EACH FRANCHISE ===
         for franchise in FRANCHISES:
+            global CURRENT_WEBHOOK, CURRENT_FRANCHISE
             franchise_name = franchise["name"]
             CURRENT_WEBHOOK = franchise["webhook"]
+            CURRENT_FRANCHISE = franchise
             
             print(f"\n{'='*50}")
             print(f"📋 Scanning {franchise_name}...")
@@ -1265,7 +1381,7 @@ def main():
                                 continue
                             
                             print(f"    🔍 Verifying: {category_name}...", end=" ")
-                            confirmed_status, confirmed_name = confirm_product_stock(product_url)
+                            confirmed_status, confirmed_name, image_url, price = confirm_product_stock(product_url)
                             
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
@@ -1278,13 +1394,14 @@ def main():
                             if confirmed_status == "in":
                                 franchise_changes += 1
                                 clear_verified_out(product_url)
-                                if change_type == "new":
-                                    message = f"🆕 **NEW PRODUCT** at {store_name}\n**{display_name}**"
+                                is_new_product = (change_type == "new")
+                                if is_new_product:
                                     print(f"✅ IN STOCK!")
                                 else:
-                                    message = f"📦 **BACK IN STOCK** at {store_name}\n**{display_name}**"
                                     print(f"✅ RESTOCKED!")
-                                send_alert(message, product_url)
+                                send_alert(display_name, product_url, store_name, 
+                                          is_preorder=False, is_new=is_new_product,
+                                          image_url=image_url, price=price)
                                 mark_alerted(url, product_url)
                                 if product_url in state[url]:
                                     state[url][product_url]["last_alerted"] = datetime.now()
@@ -1292,9 +1409,10 @@ def main():
                             elif confirmed_status == "preorder":
                                 franchise_changes += 1
                                 clear_verified_out(product_url)
-                                message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{display_name}**"
                                 print(f"📋 PREORDER!")
-                                send_alert(message, product_url)
+                                send_alert(display_name, product_url, store_name,
+                                          is_preorder=True, is_new=False,
+                                          image_url=image_url, price=price)
                                 mark_alerted(url, product_url)
                                 if product_url in state[url]:
                                     state[url][product_url]["last_alerted"] = datetime.now()
@@ -1354,15 +1472,16 @@ def main():
                                 if verified_status in ("in", "preorder"):
                                     franchise_changes += 1
                                     change_type = change.get("type", "restock")
+                                    is_preorder = (change_type == "preorder" or verified_status == "preorder")
                                     
-                                    if change_type == "preorder" or verified_status == "preorder":
-                                        message = f"📋 **PREORDER AVAILABLE** at {store_name}\n**{change['name']}**"
+                                    if is_preorder:
                                         print(f"✅ PREORDER CONFIRMED!")
                                     else:
-                                        message = f"📦 **BACK IN STOCK** at {store_name}\n**{change['name']}**"
                                         print(f"✅ RESTOCK CONFIRMED!")
                                     
-                                    send_alert(message, change["url"])
+                                    send_alert(change['name'], change["url"], store_name,
+                                              is_preorder=is_preorder, is_new=False,
+                                              image_url=None, price=None)
                                     direct_state[url]["last_alerted"] = datetime.now()
                                     save_product(url, url, current_state.get("name"), True)
                                     mark_alerted(url, url)
