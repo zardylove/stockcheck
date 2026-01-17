@@ -1115,17 +1115,11 @@ def check_store_page(url, previous_products, stats):
                 category_state = product_info.get("category_state", "unknown")
                 prev_in_stock = prev_info.get("in_stock", False)
                 
-                # Update in_stock based on category state:
-                # - "out" on category page = genuinely out of stock, set False
-                # - "in"/"preorder" = potentially in stock, preserve previous until verified
-                # - "unknown" = preserve previous state
-                if category_state == "out":
-                    # Category page shows OUT - product genuinely went out of stock
-                    current_products[product_url]["in_stock"] = False
-                else:
-                    # Category shows "in", "preorder", or "unknown" - preserve previous state
-                    # Verification will update to True if confirmed in stock
-                    current_products[product_url]["in_stock"] = prev_in_stock
+                # IMPORTANT: Always preserve previous in_stock state
+                # Category page detection is unreliable due to JS templates showing
+                # "Sold out" text even for in-stock products
+                # Only product page verification should change stock status
+                current_products[product_url]["in_stock"] = prev_in_stock
                 
                 # Detect potential restocks:
                 # 1. Product was out of stock, now shows preorder (in_stock=True from category)
