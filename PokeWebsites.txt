@@ -88,3 +88,8 @@ https://kirtongames.co.uk/collections/pokemon-trading-card-game
 https://www.rollplaygames.co.uk/collections/pokemon?sort_by=created-descending
 https://nerdcave.com.co/collections/booster-boxes?filter.v.availability=1&filter.v.price.gte=&filter.v.price.lte=&sort_by=created-descending
 https://tcgmeta.co.uk/collections/sealed?filter.v.availability=1
+https://acetcg.co.uk/collections/pokemon-boxes							
+https://www.jdaycollectibles.co.uk/pokemon?sort=newest							
+https://allthingsgames.co.uk/collections/pokemon?sort_by=created-descending					
+https://cardmode.co.uk/product-category/trading-card-games/pokemon/
+https://alchemistsworkshops.com/product-category/collectible-card-games/pokemon-tcg/pokemon-tcg-booster-box/

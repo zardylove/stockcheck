@@ -24,14 +24,14 @@ FRANCHISES = [
         "store_file": "PokeWebsites.txt",
         "direct_file": "PokeDirectProducts.txt",
         "webhook": os.getenv("POKESTOCK"),
-        "role_id": ("POKEID")
+        "role_id": os.getenv("POKEID")
     },
     {
         "name": "One Piece",
         "store_file": "OPWebsites.txt",
         "direct_file": "OPDirectProducts.txt",
         "webhook": os.getenv("OPSTOCK"),
-        "role_id": ("OPID")
+        "role_id": os.getenv("OPID")
     }
 ]
 
