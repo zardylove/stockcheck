@@ -1240,6 +1240,10 @@ def check_store_page(url, previous_products, stats):
                 # 2. Product was out of stock, now shows "in" on category page (needs verification)
                 was_out = not prev_in_stock
                 
+                # Skip if already verified as OUT - don't even add to changes list
+                if is_verified_out(product_url):
+                    continue
+                
                 # Case 1: Became preorder (category marked it in_stock=True)
                 if was_out and product_info["in_stock"]:
                     last_alerted = prev_info.get("last_alerted")
