@@ -503,10 +503,11 @@ LAST_VERIFIED = {}  # product_url -> datetime (throttle verification requests)
 def should_verify(product_url):
     """Check if enough time has passed since last verification to prevent hammering product pages."""
     last = LAST_VERIFIED.get(product_url)
-    if last and datetime.now() - last < timedelta(minutes=VERIFY_COOLDOWN_MINUTES):
-        return False
+    return not last or datetime.now() - last >= timedelta(minutes=VERIFY_COOLDOWN_MINUTES)
+
+def mark_verified_now(product_url):
+    """Mark product as verified (call after successful fetch)."""
     LAST_VERIFIED[product_url] = datetime.now()
-    return True
 
 def should_alert(last_alerted):
     """
@@ -1446,13 +1447,19 @@ def main():
                             print(f"    🔍 Verifying: {category_name}...", end=" ")
                             confirmed_status, confirmed_name, image_url, price = confirm_product_stock(product_url)
                             
+                            # Only mark as verified if we got a definitive result (not unknown from errors)
+                            if confirmed_status != "unknown":
+                                mark_verified_now(product_url)
+                            
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
-                            # Persist verified stock state
+                            # Persist verified stock state to DB/state
                             if product_url in state[url]:
                                 if confirmed_status in ("in", "preorder"):
                                     state[url][product_url]["in_stock"] = True
                                     clear_verified_out(product_url)  # Clear out-of-stock cache
+                                elif confirmed_status == "out":
+                                    state[url][product_url]["in_stock"] = False
                             
                             if confirmed_status == "in":
                                 clear_verified_out(product_url)
