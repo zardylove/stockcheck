@@ -1240,21 +1240,17 @@ def check_store_page(url, previous_products, stats):
                 # 2. Product was out of stock, now shows "in" on category page (needs verification)
                 was_out = not prev_in_stock
                 
-                # Skip if already verified as OUT - don't even add to changes list
+                # Skip if already verified as OUT (in-memory cache)
                 if is_verified_out(product_url):
+                    continue
+                
+                # Skip if product was already verified OUT in database
+                # Category page showing "in" is unreliable - don't re-verify every scan
+                if not prev_in_stock and category_state == "in":
                     continue
                 
                 # Case 1: Became preorder (category marked it in_stock=True)
                 if was_out and product_info["in_stock"]:
-                    last_alerted = prev_info.get("last_alerted")
-                    if should_alert(last_alerted):
-                        changes.append({
-                            "type": "restock",
-                            "name": product_info["name"],
-                            "url": product_url
-                        })
-                # Case 2: Shows "in stock" on category page - needs verification
-                elif was_out and category_state == "in":
                     last_alerted = prev_info.get("last_alerted")
                     if should_alert(last_alerted):
                         changes.append({
