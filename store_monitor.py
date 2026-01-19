@@ -1274,6 +1274,8 @@ def check_store_page(url, previous_products, stats):
                 current_products[product_url]["last_alerted"] = prev_info.get("last_alerted")
                 
                 category_state = product_info.get("category_state", "unknown")
+                # CRITICAL: Store category availability BEFORE overwriting in_stock
+                category_available = product_info.get("in_stock", False)
                 prev_in_stock = prev_info.get("in_stock", False)
                 
                 # IMPORTANT: Always preserve previous in_stock state
@@ -1296,8 +1298,8 @@ def check_store_page(url, previous_products, stats):
                 if not prev_in_stock and category_state == "in":
                     continue
                 
-                # Case 1: Became preorder (category marked it in_stock=True)
-                if was_out and product_info["in_stock"]:
+                # Case 1: Became preorder (category marked it in_stock=True from category scan)
+                if was_out and category_available:
                     last_alerted = prev_info.get("last_alerted")
                     if should_alert(last_alerted):
                         changes.append({
