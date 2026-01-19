@@ -1432,30 +1432,40 @@ def main():
                                     clear_verified_out(product_url)  # Clear out-of-stock cache
                             
                             if confirmed_status == "in":
-                                franchise_changes += 1
                                 clear_verified_out(product_url)
-                                is_new_product = (change_type == "new")
-                                if is_new_product:
-                                    print(f"✅ IN STOCK!")
+                                # Check cooldown before sending alert
+                                last_alerted = state[url].get(product_url, {}).get("last_alerted")
+                                if not should_alert(last_alerted):
+                                    print(f"✅ IN STOCK (cooldown active, no alert)")
                                 else:
-                                    print(f"✅ RESTOCKED!")
-                                send_alert(display_name, product_url, store_name, 
-                                          is_preorder=False, is_new=is_new_product,
-                                          image_url=image_url, price=price)
-                                mark_alerted(url, product_url)
-                                if product_url in state[url]:
-                                    state[url][product_url]["last_alerted"] = datetime.now()
+                                    franchise_changes += 1
+                                    is_new_product = (change_type == "new")
+                                    if is_new_product:
+                                        print(f"✅ IN STOCK!")
+                                    else:
+                                        print(f"✅ RESTOCKED!")
+                                    send_alert(display_name, product_url, store_name, 
+                                              is_preorder=False, is_new=is_new_product,
+                                              image_url=image_url, price=price)
+                                    mark_alerted(url, product_url)
+                                    if product_url in state[url]:
+                                        state[url][product_url]["last_alerted"] = datetime.now()
                                     
                             elif confirmed_status == "preorder":
-                                franchise_changes += 1
                                 clear_verified_out(product_url)
-                                print(f"📋 PREORDER!")
-                                send_alert(display_name, product_url, store_name,
-                                          is_preorder=True, is_new=False,
-                                          image_url=image_url, price=price)
-                                mark_alerted(url, product_url)
-                                if product_url in state[url]:
-                                    state[url][product_url]["last_alerted"] = datetime.now()
+                                # Check cooldown before sending alert
+                                last_alerted = state[url].get(product_url, {}).get("last_alerted")
+                                if not should_alert(last_alerted):
+                                    print(f"📋 PREORDER (cooldown active, no alert)")
+                                else:
+                                    franchise_changes += 1
+                                    print(f"📋 PREORDER!")
+                                    send_alert(display_name, product_url, store_name,
+                                              is_preorder=True, is_new=False,
+                                              image_url=image_url, price=price)
+                                    mark_alerted(url, product_url)
+                                    if product_url in state[url]:
+                                        state[url][product_url]["last_alerted"] = datetime.now()
                                     
                             elif confirmed_status == "out":
                                 mark_verified_out(product_url)  # Cache as verified OUT
@@ -1510,21 +1520,28 @@ def main():
                                     direct_state[url]["in_stock"] = False
                                 
                                 if verified_status in ("in", "preorder"):
-                                    franchise_changes += 1
-                                    change_type = change.get("type", "restock")
-                                    is_preorder = (change_type == "preorder" or verified_status == "preorder")
-                                    
-                                    if is_preorder:
-                                        print(f"✅ PREORDER CONFIRMED!")
+                                    # Check cooldown before sending alert
+                                    last_alerted = direct_state.get(url, {}).get("last_alerted")
+                                    if not should_alert(last_alerted):
+                                        print(f"✅ IN STOCK (cooldown active, no alert)")
+                                        direct_state[url]["in_stock"] = True
+                                        save_product(url, url, current_state.get("name"), True)
                                     else:
-                                        print(f"✅ RESTOCK CONFIRMED!")
-                                    
-                                    send_alert(change['name'], change["url"], store_name,
-                                              is_preorder=is_preorder, is_new=False,
-                                              image_url=None, price=None)
-                                    direct_state[url]["last_alerted"] = datetime.now()
-                                    save_product(url, url, current_state.get("name"), True)
-                                    mark_alerted(url, url)
+                                        franchise_changes += 1
+                                        change_type = change.get("type", "restock")
+                                        is_preorder = (change_type == "preorder" or verified_status == "preorder")
+                                        
+                                        if is_preorder:
+                                            print(f"✅ PREORDER CONFIRMED!")
+                                        else:
+                                            print(f"✅ RESTOCK CONFIRMED!")
+                                        
+                                        send_alert(change['name'], change["url"], store_name,
+                                                  is_preorder=is_preorder, is_new=False,
+                                                  image_url=None, price=None)
+                                        direct_state[url]["last_alerted"] = datetime.now()
+                                        save_product(url, url, current_state.get("name"), True)
+                                        mark_alerted(url, url)
                                 else:
                                     print(f"❌ Verification failed ({verified_status.upper()})")
                                     save_product(url, url, current_state.get("name"), False)
