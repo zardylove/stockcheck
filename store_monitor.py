@@ -1502,7 +1502,8 @@ def main():
                                 print(f"❌ OUT OF STOCK (no alert)")
                                     
                             else:
-                                mark_verified_out(product_url)  # Also cache unknown to prevent spam
+                                # Don't cache unknown - rely on verify cooldown to avoid spam
+                                # This prevents temporary glitches from blocking future verifications
                                 print(f"❓ UNKNOWN (no alert)")
                             
                             time.sleep(1)
