@@ -1056,7 +1056,9 @@ def is_product_url(url, base_url):
         r'/page/', r'/category/', r'/collections/?$',
         r'/cdn/', r'/static/', r'\.js$', r'\.css$',
         r'\.jpg$', r'\.png$', r'\.gif$', r'/cdn-cgi/',
-        r'-c-\d+(?:_\d+)*/?(?:\?|$)'
+        r'-c-\d+(?:_\d+)*/?(?:\?|$)',
+        r'/collections/[^/]+$',  # Collection-only URLs without /products/
+        r'/collections/[^/]+\?'  # Collection URLs with query params
     ]
     
     url_lower = url.lower()
