@@ -230,12 +230,19 @@ def init_database():
 
 
 def normalize_product_url(url):
-    """Normalize URL by removing query strings, fragments, and standardizing format."""
+    """Normalize URL by removing query strings, fragments, collection paths, and standardizing format."""
     try:
         parsed = urlparse(url)
         path = parsed.path.rstrip('/')
         if not path:
             return None
+        
+        # Strip Shopify collection path: /collections/xxx/products/yyy -> /products/yyy
+        # This ensures the same product is treated identically regardless of which collection found it
+        if '/collections/' in path and '/products/' in path:
+            products_idx = path.find('/products/')
+            path = path[products_idx:]
+        
         normalized = urlunparse((parsed.scheme, parsed.netloc.lower(), path, '', '', ''))
         return normalized
     except:
