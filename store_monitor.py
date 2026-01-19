@@ -793,6 +793,8 @@ def find_product_container(soup):
         '.categoryProducts', '.category-products', '.listing-products',
         '[class*="product-list"]', '[class*="productList"]',
         '.collection-products', '.grid-products', '.product-items',
+        '[data-section-type="collection"]', '.grid--uniform', '.collection-grid',
+        '.product-grid-item', 'ul.products', 'div.grid-products', '[role="list"]',
         'main', '.main-content', '#main-content', '.content-main'
     ]
     
@@ -817,8 +819,15 @@ def extract_products(soup, base_url):
     """
     products = {}
     
+    # Try container first, then aggressive direct product link finder
     container = find_product_container(soup)
-    product_links = container.find_all('a', href=True) if container else soup.find_all('a', href=True)
+    if container:
+        product_links = container.find_all('a', href=True)
+    else:
+        # More aggressive: find all product links directly
+        product_links = soup.select('a[href*="/products/"], a[href*="/product/"]')
+        if not product_links:
+            product_links = soup.find_all('a', href=True)
     
     for link in product_links:
         href = link.get('href', '')
@@ -895,6 +904,16 @@ def fetch_shopify_products_json(base_url):
     """Try to fetch products from Shopify products.json API (collection-specific if possible)."""
     try:
         parsed = urlparse(base_url)
+        
+        # Skip API for search/filter URLs - API doesn't support query params
+        if '?q=' in base_url or '&q=' in base_url or 'search' in base_url.lower():
+            return None
+        
+        # Skip API for special collection handles that aren't real collections
+        skip_handles = ['vendors', 'types', 'tags', 'all']
+        for skip in skip_handles:
+            if f'/collections/{skip}' in base_url.lower():
+                return None
         
         # Try collection-specific endpoint first if URL has /collections/
         collection_match = re.search(r'/collections/([^/?]+)', base_url)

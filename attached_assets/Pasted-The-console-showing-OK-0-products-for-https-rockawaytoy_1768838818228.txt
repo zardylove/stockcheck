@@ -1,0 +1,57 @@
+The console showing "OK (0 products)" for https://rockawaytoys.co.uk/collections/vendors?q=The+Pok%C3%A9mon+Company+Int.+Inc. (even though the page clearly has products in a browser) is a real issue, but it's not a bug in your bot — it's caused by how the site is structured + your current fallback logic.Why the Bot Sees 0 ProductsThe URL is a vendor search/filter page (/collections/vendors?q=...):This is not a standard Shopify collection handle (like /collections/pokemon).
+Shopify's public API (/collections/[handle]/products.json) does not work on /vendors or query-string search pages — it returns 0 or 404.
+Your Shopify fallback gets triggered but fails:is_shopify_store(url) returns True (correct — it's Shopify).
+When HTML scraping finds 0 products (more on why below), looks_blocked becomes True.
+shopify_fallback_discovery runs → tries /collections/vendors/products.json → gets nothing → returns None.
+Result: Still 0 products → "OK (0 products)".
+Why HTML scraping (extract_products) also fails to find anything:The page loads products via JavaScript (common on Shopify with dynamic filters, lazy loading, or custom themes).
+requests.get gets raw HTML with an empty or hidden grid (e.g., <div class="product-grid" data-ajax-load>...</div> or React placeholders).
+Your find_product_container and product_links selectors don't match anything → 0 links → curr_count = 0.
+Then JS-only check might skip or fallback kicks in (but API fails too).
+Browser sees products because it runs JS. Your bot (pure requests + BeautifulSoup) sees the pre-JS shell → empty.Quick Fixes (Pick One or Combine)Here are the most effective, low-to-medium effort solutions:Best & Fastest: Skip Shopify fallback for URLs with query params (?q=)
+Add this check in check_store_page right before the fallback block:python
+# === SHOPIFY FALLBACK DISCOVERY ===
+looks_blocked = (prev_count > 0 and curr_count < prev_count * 0.5) or curr_count == 0
+
+# NEW: Skip API fallback for search/vendor query URLs
+if '?q=' in url or '/vendors' in url:
+    print("⏭️ Skipping Shopify fallback for search/vendor URL")
+elif looks_blocked and is_shopify_store(url):
+    print(f"🔄 FALLBACK", end=" ")
+    fallback_products = shopify_fallback_discovery(url, curr_count)
+    # ... rest as before
+
+→ This lets HTML scraping take priority (even if currently 0) and prevents wasting time on bad API calls.
+Make HTML scraping more robust (recommended next step)
+Add more flexible selectors to find_product_container and extract_products:python
+container_selectors = [
+    # Existing ones...
+    '[data-section-type="collection"]',  # Common Shopify
+    '.grid--uniform', '.collection-grid', '.product-grid-item',
+    'ul.products', 'div.grid-products', '[role="list"]',  # Modern themes
+]
+
+In extract_products, try broader link finding:python
+product_links = soup.select('a[href*="/products/"], a[href*="/product/"]')  # More aggressive
+
+This often catches lazy-loaded or differently classed grids.
+Long-term: Add Playwright for JS rendering (ultimate fix)
+As discussed before — use it when curr_count == 0 after normal fetch.
+This would load the full rendered page → see the 14+ products.
+Install & add the function (see previous messages for code).
+Call it conditionally:python
+if curr_count == 0 and is_shopify_store(url):
+    print("Trying JS render for empty Shopify page...")
+    html = fetch_js_rendered(url)  # your Playwright function
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
+        current_products = extract_products(soup, url)
+        curr_count = len(current_products)
+
+→ Rockawaytoys (and similar JS-heavy sites) would then work.
+
+SummaryThe page does have products (vendor search for Pokémon Co.), but your bot sees 0 because:HTML scraping fails on JS-loaded content.
+Shopify API fallback fails on non-standard /vendors?q= URLs.
+Add the query-param skip for fallback → quick win.
+Improve selectors or add Playwright → permanent fix for sites like this.
+
