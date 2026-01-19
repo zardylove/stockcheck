@@ -497,6 +497,16 @@ def mark_alerted(store_url, product_url):
             return_db_connection(conn)
 
 ALERT_COOLDOWN_MINUTES = 30  # Don't re-alert same product within this window
+VERIFY_COOLDOWN_MINUTES = 10  # Don't re-verify same product within this window
+LAST_VERIFIED = {}  # product_url -> datetime (throttle verification requests)
+
+def should_verify(product_url):
+    """Check if enough time has passed since last verification to prevent hammering product pages."""
+    last = LAST_VERIFIED.get(product_url)
+    if last and datetime.now() - last < timedelta(minutes=VERIFY_COOLDOWN_MINUTES):
+        return False
+    LAST_VERIFIED[product_url] = datetime.now()
+    return True
 
 def should_alert(last_alerted):
     """
@@ -1426,6 +1436,11 @@ def main():
                             # Skip if already verified as out-of-stock recently
                             if is_verified_out(product_url):
                                 print(f"    ⏭️ Skipping: {category_name}... (recently verified OUT)")
+                                continue
+                            
+                            # Skip if verified too recently (throttle verification requests)
+                            if not should_verify(product_url):
+                                print(f"    ⏭️ Skipping: {category_name}... (verify cooldown)")
                                 continue
                             
                             print(f"    🔍 Verifying: {category_name}...", end=" ")
