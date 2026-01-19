@@ -489,11 +489,30 @@ def mark_alerted(store_url, product_url):
         if conn:
             return_db_connection(conn)
 
+ALERT_COOLDOWN_MINUTES = 30  # Don't re-alert same product within this window
+
 def should_alert(last_alerted):
     """
-    No time-based cooldown.
-    Alert purely on OUT → IN transitions.
+    Check if enough time has passed since last alert to prevent spam from stock flickering.
     """
+    if last_alerted is None:
+        return True
+    
+    from datetime import datetime, timedelta
+    
+    # Handle both datetime objects and strings
+    if isinstance(last_alerted, str):
+        try:
+            last_alerted = datetime.fromisoformat(last_alerted)
+        except:
+            return True
+    
+    cooldown = timedelta(minutes=ALERT_COOLDOWN_MINUTES)
+    time_since_alert = datetime.now() - last_alerted
+    
+    if time_since_alert < cooldown:
+        return False  # Still in cooldown
+    
     return True
 
 def is_url_initialized(store_url):
