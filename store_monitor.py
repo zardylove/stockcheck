@@ -784,6 +784,7 @@ def confirm_product_stock(product_url):
         return stock_status, product_name, image_url, price
         
     except Exception as e:
+        print(f"❌ confirm_product_stock error: {e}")
         return "unknown", None, None, None
 
 def get_product_card_text(link):
@@ -1293,13 +1294,11 @@ def check_store_page(url, previous_products, stats):
                 if is_verified_out(product_url):
                     continue
                 
-                # Skip if product was already verified OUT in database
-                # Category page showing "in" is unreliable - don't re-verify every scan
-                if not prev_in_stock and category_state == "in":
-                    continue
-                
-                # Case 1: Became preorder (category marked it in_stock=True from category scan)
-                if was_out and category_available:
+                # Trigger verification for potential restocks:
+                # - category_available=True means preorder detected (reliable)
+                # - category_state="in" means stock indicators found (verify to confirm)
+                # Cooldown prevents spam from flickering stock
+                if was_out and (category_available or category_state == "in"):
                     last_alerted = prev_info.get("last_alerted")
                     if should_alert(last_alerted):
                         changes.append({
