@@ -786,8 +786,16 @@ def confirm_product_stock(product_url):
         
         # Block alerts if store is unavailable / maintenance / password protected
         if is_store_unavailable(page_text):
-            print("⚠️ Store unavailable/maintenance – treating as OUT")
-            return "out", product_name, image_url, price
+            print("⚠️ Store unavailable/maintenance")
+            return "unknown", product_name, image_url, price
+        
+        # Detect anti-bot / captcha pages early
+        deny_terms = ["captcha", "access denied", "cloudflare", "attention required", 
+                      "verify you are human", "please wait", "checking your browser",
+                      "ddos protection", "security check"]
+        if any(t in raw_html.lower() for t in deny_terms):
+            print("⚠️ Anti-bot page detected")
+            return "unknown", product_name, image_url, price
         
         # Detect anti-bot / captcha pages that return 200 but aren't real product pages
         # A real product page should have og:type=product, product schema, or price elements
