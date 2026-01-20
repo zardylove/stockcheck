@@ -1329,7 +1329,7 @@ def check_store_page(url, previous_products, stats):
                         current_products[purl] = pinfo
                     elif pinfo.get("in_stock") and not current_products[purl].get("in_stock"):
                         current_products[purl]["in_stock"] = True
-                        current_products[purl]["category_state"] = pinfo.get("category_state", "in")
+                        current_products[purl]["category_state"] = pinfo.get("category_state", "unknown")
                 curr_count = len(current_products)
                 print(f"({curr_count} products via API)", end=" ")
         
@@ -1523,13 +1523,17 @@ def main():
                             
                             display_name = confirmed_name if confirmed_name else change["name"]
                             
-                            # Persist verified stock state to DB/state
+                            # Persist verified stock state to DB/state IMMEDIATELY
+                            # This prevents repeated verification on restarts
                             if product_url in state[url]:
+                                product_name = state[url][product_url].get("name", display_name)
                                 if confirmed_status in ("in", "preorder"):
                                     state[url][product_url]["in_stock"] = True
-                                    clear_verified_out(product_url)  # Clear out-of-stock cache
+                                    save_product(url, product_url, product_name, True)  # Persist NOW
+                                    clear_verified_out(product_url)
                                 elif confirmed_status == "out":
                                     state[url][product_url]["in_stock"] = False
+                                    save_product(url, product_url, product_name, False)  # Persist NOW
                             
                             if confirmed_status == "in":
                                 clear_verified_out(product_url)
