@@ -959,6 +959,17 @@ def extract_products(soup, base_url):
         
         product_name = product_name[:100]
         
+        # Filter out garbage UI elements extracted as products
+        garbage_names = ['skip to main content', 'skip to content', 'filters', 'filter', 
+                         'quick view', 'view all', 'load more', 'show more', 'see more',
+                         'add to cart', 'add to basket', 'buy now', 'learn more']
+        if product_name.lower().strip() in garbage_names:
+            continue
+        
+        # Skip if product URL is same as category URL (not a real product)
+        if full_url.rstrip('/') == base_url.rstrip('/'):
+            continue
+        
         # Filter out non-TCG products (plushies, toys, etc.)
         if not is_tcg_product(product_name, full_url):
             continue
