@@ -789,8 +789,37 @@ def confirm_product_stock(product_url):
             print("⚠️ Store unavailable/maintenance – treating as OUT")
             return "out", product_name, image_url, price
         
+        # Detect anti-bot / captcha pages that return 200 but aren't real product pages
+        # A real product page should have og:type=product, product schema, or price elements
+        is_real_product_page = False
+        product_indicators = [
+            'og:type" content="product',
+            'og:product',
+            'schema.org/Product',
+            'product:price',
+            'itemprop="price"',
+            'class="product-',
+            'class="product_',
+            'id="product-',
+            'data-product-id',
+            '/products/',  # Shopify product URL in canonical
+        ]
+        for indicator in product_indicators:
+            if indicator in raw_html:
+                is_real_product_page = True
+                break
+        
+        # Also check if we found a price (strong indicator of real product page)
+        if price:
+            is_real_product_page = True
+        
         # Classify stock status - check both visible text AND raw HTML for schema.org data
         stock_status = classify_stock(page_text + " " + raw_html)
+        
+        # If page doesn't look like a real product page, return unknown
+        # This prevents anti-bot pages from poisoning the cache
+        if not is_real_product_page and stock_status == "out":
+            return "unknown", product_name, image_url, price
         
         return stock_status, product_name, image_url, price
         
