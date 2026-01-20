@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 import time
 import os
 import random
-import json
 import re
 import psycopg2
 from psycopg2 import pool
@@ -1269,7 +1268,6 @@ def check_direct_product(url, previous_state, stats):
         change = None
         if previous_state:
             was_available = previous_state.get("in_stock", False)
-            prev_status = previous_state.get("stock_status", "out")
             
             # Alert if: was out/unknown, now in/preorder
             if not was_available and is_available:
