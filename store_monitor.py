@@ -470,7 +470,7 @@ def load_direct_state():
             direct_state[url] = {
                 "name": product_name or "",
                 "in_stock": in_stock,
-                "stock_status": "in" if in_stock else "out",
+                "stock_status": "unknown",  # Let next scan determine actual status
                 "last_alerted": last_alerted
             }
         cur.close()
