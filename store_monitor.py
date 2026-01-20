@@ -1587,7 +1587,7 @@ def main():
                             current_state["last_alerted"] = datetime.now()
                             direct_state[url] = current_state
                         else:
-                            direct_state[url] = {"name": "", "in_stock": False, "stock_status": "out", "last_alerted": datetime.now()}
+                            direct_state[url] = {"name": "", "in_stock": False, "stock_status": "unknown", "last_alerted": datetime.now()}
                         print(f"🆕 First scan, alerts silenced")
                         continue
                     
