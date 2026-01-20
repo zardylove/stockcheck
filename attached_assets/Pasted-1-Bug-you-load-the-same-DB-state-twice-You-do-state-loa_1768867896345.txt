@@ -1,0 +1,57 @@
+1) Bug: you load the same DB state twice
+
+You do:
+
+state = load_state()
+direct_state = load_state()
+
+
+That means direct_state starts as a store-style dict ({store_url: {product_url: {...}}}), but later you treat direct_state[url] like a single product dict ({"name":..., "in_stock":...}).
+
+It might “sort of work” by accident, but it’s logically inconsistent and can break alerts.
+
+Fix: keep direct products in their own DB table, or simpler for now:
+
+keep direct_state = {} in memory (don’t load it from DB), and use the DB as the source of truth via save_product()/queries,
+
+OR add a separate load_direct_state() that reads product_state rows where store_url = product_url (your direct rows).
+
+2) Bug: direct products aren’t included in save_state()
+
+At the end you do:
+
+save_state(state)
+
+
+But you never persist direct_state through save_state(). You do call save_product() in a few places, but not consistently for every direct URL every cycle.
+
+This means direct product state can drift.
+
+Fix: either:
+
+always call save_product(url, url, name, in_stock) for direct products every cycle, or
+
+merge direct into state and let save_state() handle both (careful with schema).
+
+3) “Verified out” cache never clears on disappearance/reappearance
+
+Your comment says it “clears when product disappears and reappears”, but the code only clears when you verify in/preorder:
+
+clear_verified_out(product_url)
+
+
+If a product disappears from a category for a while and later comes back, it may still be stuck in VERIFIED_OUT_CACHE and you’ll skip verification forever.
+
+Fix (simple): when scanning a store page, after current_products is built:
+
+compute which previously-known products are missing,
+
+clear_verified_out() for those missing URLs (or at least remove them from cache).
+
+4) You’re doing requests.post instead of SESSION.post
+
+Not critical, but you lose the session settings/benefits for Discord alerts. Switch to SESSION.post(...) or leave it—either is fine.
+
+5) Minor: duplicated/large hardcoded lists
+
+SHOPIFY_STORES_WITH_ANTIBOT and the mobile_sites list are huge and overlap. Not wrong, but it makes maintenance harder. Consider a single “special domains” config.

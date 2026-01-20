@@ -424,7 +424,7 @@ def load_urls(file_path="PokeWebsites.txt"):
         return []
 
 def load_state():
-    """Load product state from database."""
+    """Load product state from database (store pages only, where store_url != product_url)."""
     state = {}
     if not DATABASE_URL:
         print("❌ DATABASE_URL not set! Cannot load state.")
@@ -433,7 +433,8 @@ def load_state():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT store_url, product_url, product_name, in_stock, last_alerted FROM product_state")
+        # Only load store page products (not direct products)
+        cur.execute("SELECT store_url, product_url, product_name, in_stock, last_alerted FROM product_state WHERE store_url != product_url")
         rows = cur.fetchall()
         for store_url, product_url, product_name, in_stock, last_alerted in rows:
             if store_url not in state:
@@ -452,6 +453,34 @@ def load_state():
         if conn:
             return_db_connection(conn)
     return state
+
+def load_direct_state():
+    """Load direct product state from database (where store_url = product_url)."""
+    direct_state = {}
+    if not DATABASE_URL:
+        return direct_state
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Load direct products (store_url = product_url)
+        cur.execute("SELECT store_url, product_name, in_stock, last_alerted FROM product_state WHERE store_url = product_url")
+        rows = cur.fetchall()
+        for url, product_name, in_stock, last_alerted in rows:
+            direct_state[url] = {
+                "name": product_name or "",
+                "in_stock": in_stock,
+                "stock_status": "in" if in_stock else "out",
+                "last_alerted": last_alerted
+            }
+        cur.close()
+        return_db_connection(conn)
+        print(f"📂 Database: Loaded {len(rows)} direct products")
+    except Exception as e:
+        print(f"❌ Error loading direct state: {e}")
+        if conn:
+            return_db_connection(conn)
+    return direct_state
 
 def save_product(store_url, product_url, product_name, in_stock):
     """Save a single product to the database."""
@@ -689,7 +718,7 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     }
     
     try:
-        r = requests.post(webhook_url, json=data, timeout=10)
+        r = SESSION.post(webhook_url, json=data, timeout=10)
         if r.status_code == 204:
             print(f"✅ Alert sent!")
         else:
@@ -1376,6 +1405,12 @@ def check_store_page(url, previous_products, stats):
                             "url": product_url
                         })
         
+        # Clear verified-out cache for products that disappeared and may reappear
+        # This ensures we re-verify them when they come back
+        for prev_url in previous_products:
+            if prev_url not in current_products:
+                clear_verified_out(prev_url)
+        
         return current_products, changes
         
     except requests.exceptions.Timeout:
@@ -1424,7 +1459,7 @@ def main():
     
     # Load state from database
     state = load_state()
-    direct_state = load_state()
+    direct_state = load_direct_state()
     first_run = len(state) == 0
     
     if first_run:
@@ -1586,8 +1621,10 @@ def main():
                         if current_state:
                             current_state["last_alerted"] = datetime.now()
                             direct_state[url] = current_state
+                            save_product(url, url, current_state.get("name"), current_state.get("in_stock", False))
                         else:
                             direct_state[url] = {"name": "", "in_stock": False, "stock_status": "unknown", "last_alerted": datetime.now()}
+                            save_product(url, url, "", False)
                         print(f"🆕 First scan, alerts silenced")
                         continue
                     
