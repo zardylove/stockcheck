@@ -792,20 +792,25 @@ def confirm_product_stock(product_url):
         # Detect anti-bot / captcha pages that return 200 but aren't real product pages
         # A real product page should have og:type=product, product schema, or price elements
         is_real_product_page = False
+        raw_lower = raw_html.lower()
         product_indicators = [
             'og:type" content="product',
             'og:product',
-            'schema.org/Product',
+            'schema.org/product',
+            '"@type":"product"',  # JSON-LD schema
+            "'@type':'product'",
             'product:price',
             'itemprop="price"',
             'class="product-',
             'class="product_',
             'id="product-',
             'data-product-id',
-            '/products/',  # Shopify product URL in canonical
+            'add-to-cart',
+            'addtocart',
+            'product-form',
         ]
         for indicator in product_indicators:
-            if indicator in raw_html:
+            if indicator.lower() in raw_lower:
                 is_real_product_page = True
                 break
         
