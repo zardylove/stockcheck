@@ -247,7 +247,7 @@ def normalize_product_url(url):
     except:
         return url
 
-CHECK_INTERVAL = 0
+CHECK_INTERVAL = 5  # Safety interval to prevent CPU spin when many sites are cached/skipped
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
