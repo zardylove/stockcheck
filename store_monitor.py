@@ -819,15 +819,7 @@ def confirm_product_stock(product_url):
         
         raw_lower = raw_html.lower()
         
-        # Detect anti-bot / captcha pages early
-        deny_terms = ["captcha", "access denied", "cloudflare", "attention required", 
-                      "verify you are human", "please wait", "checking your browser",
-                      "ddos protection", "security check"]
-        if any(t in raw_lower for t in deny_terms):
-            print("⚠️ Anti-bot page detected")
-            return "unknown", product_name, image_url, price
-        
-        # Detect anti-bot / captcha pages that return 200 but aren't real product pages
+        # Detect pages that return 200 but aren't real product pages
         # A real product page should have og:type=product, product schema, or price elements
         is_real_product_page = False
         product_indicators = [
@@ -1230,19 +1222,6 @@ def check_direct_product(url, previous_state, stats):
         # Block alerts if store is unavailable / maintenance / password protected
         if is_store_unavailable(page_text):
             print("⚠️ Store unavailable/maintenance")
-            return {
-                "name": product_name,
-                "in_stock": False,
-                "stock_status": "unknown",
-                "last_alerted": previous_state.get("last_alerted") if previous_state else None
-            }, None
-        
-        # Detect anti-bot / captcha pages early
-        deny_terms = ["captcha", "access denied", "cloudflare", "attention required", 
-                      "verify you are human", "please wait", "checking your browser",
-                      "ddos protection", "security check"]
-        if any(t in raw_lower for t in deny_terms):
-            print("⚠️ Anti-bot page detected")
             return {
                 "name": product_name,
                 "in_stock": False,
