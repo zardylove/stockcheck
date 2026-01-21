@@ -20,14 +20,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 FRANCHISES = [
     {
         "name": "Pokemon",
-        "store_files": [
+        "store_files": [],  # Empty - we are using direct files only
+        "direct_files": [
             "Pokemon/Poke-30A.txt",
             "Pokemon/Poke-AH.txt",
             "Pokemon/Poke-DR.txt",
             "Pokemon/Poke-ME.txt",
             "Pokemon/Poke-PO.txt"
         ],
-        "direct_files": [],  # Add any remaining direct files here if needed
         "webhook_secrets": [
             {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A"), "role_id": os.getenv("POKE30A_ROLE")},
             {"file": "Pokemon/Poke-AH.txt", "webhook": os.getenv("POKEAH"), "role_id": os.getenv("POKEAH_ROLE")},
@@ -38,7 +38,8 @@ FRANCHISES = [
     },
     {
         "name": "One Piece",
-        "store_files": [
+        "store_files": [],  # Empty - we are using direct files only
+        "direct_files": [
             "One Piece/EB-02.txt",
             "One Piece/EB-03.txt",
             "One Piece/IB-V5.txt",
@@ -46,7 +47,6 @@ FRANCHISES = [
             "One Piece/OP-13.txt",
             "One Piece/OP-14.txt"
         ],
-        "direct_files": [],  # Add any remaining direct files here if needed
         "webhook_secrets": [
             {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02"), "role_id": os.getenv("EB02_ROLE")},
             {"file": "One Piece/EB-03.txt", "webhook": os.getenv("EB03"), "role_id": os.getenv("EB03_ROLE")},
@@ -219,7 +219,7 @@ def normalize_product_url(url):
         if not path:
             return None
 
-        # Strip Shopify collection path
+        # Strip Shopify collection path if present
         if '/collections/' in path and '/products/' in path:
             products_idx = path.find('/products/')
             path = path[products_idx:]
@@ -1325,12 +1325,13 @@ def main():
         total_stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
 
         for franchise in FRANCHISES:
-            CURRENT_FRANCHISE = franchise
+            global CURRENT_WEBHOOK, CURRENT_ROLE_ID
+            franchise_name = franchise["name"]
             CURRENT_WEBHOOK = None
             CURRENT_ROLE_ID = None
 
             print(f"\n{'='*50}")
-            print(f"📋 Scanning {franchise['name']}...")
+            print(f"📋 Scanning {franchise_name}...")
             print(f"{'='*50}")
 
             store_files = franchise.get("store_files", [])
@@ -1340,14 +1341,14 @@ def main():
             direct_urls = [normalize_product_url(u) for u in load_urls(direct_files) if normalize_product_url(u)]
 
             if not urls and not direct_urls:
-                print(f"   No URLs configured for {franchise['name']}")
+                print(f"   No URLs configured for {franchise_name}")
                 continue
 
             stats = {'fetched': 0, 'skipped': 0, 'failed': 0}
             franchise_changes = 0
 
             if urls:
-                print(f"\n🔍 Scanning {len(urls)} {franchise['name']} store pages...")
+                print(f"\n🔍 Scanning {len(urls)} {franchise_name} store pages...")
                 for url in urls:
                     store_name = urlparse(url).netloc
                     print(f"  Checking: {store_name}...", end=" ")
@@ -1445,7 +1446,7 @@ def main():
                     time.sleep(random.uniform(2, 4))
 
             if direct_urls:
-                print(f"\n🎯 Checking {len(direct_urls)} {franchise['name']} direct products...")
+                print(f"\n🎯 Checking {len(direct_urls)} {franchise_name} direct products...")
                 for url in direct_urls:
                     store_name = urlparse(url).netloc
                     print(f"  Checking: {store_name}...", end=" ")
@@ -1519,7 +1520,7 @@ def main():
 
                     time.sleep(random.uniform(2, 4))
 
-            print(f"\n📊 {franchise['name']}: {franchise_changes} alerts sent")
+            print(f"\n📊 {franchise_name}: {franchise_changes} alerts sent")
             print(f"   Stats: {stats['fetched']} fetched, {stats['skipped']} skipped, {stats['failed']} failed")
 
             total_cycle_changes += franchise_changes
