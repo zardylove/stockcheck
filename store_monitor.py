@@ -687,62 +687,70 @@ def main():
             print(f"{'='*50}")
 
             direct_files = franchise.get("direct_files", [])
-            direct_urls = load_urls(direct_files)
-
-            if not direct_urls:
-                print(f"   No direct URLs for {franchise_name}")
+            
+            if not direct_files:
+                print(f"   No direct files for {franchise_name}")
                 continue
 
             stats = {'fetched': 0, 'failed': 0}
             franchise_changes = 0
 
-            print(f"🎯 Checking {len(direct_urls)} direct products...")
-            for url in direct_urls:
-                store_name = urlparse(url).netloc
-                print(f"  Checking: {store_name}...", end=" ")
+            # Scan each file separately for clearer logging
+            for file_path in direct_files:
+                file_name = file_path.split('/')[-1].replace('.txt', '')
+                file_urls = load_urls([file_path])
+                
+                if not file_urls:
+                    continue
+                
+                print(f"\n📁 {file_name} ({len(file_urls)} products)")
+                
+                for url in file_urls:
+                    store_name = urlparse(url).netloc
+                    print(f"  Checking: {store_name}...", end=" ")
 
-                prev_state = direct_state.get(url)
-                current_state, change = check_direct_product(url, prev_state, stats, store_file=url)
+                    prev_state = direct_state.get(url)
+                    current_state, change = check_direct_product(url, prev_state, stats, store_file=file_path)
 
-                if current_state:
-                    direct_state[url] = current_state
-                    detailed_status = current_state.get("stock_status", "unknown").upper()
+                    if current_state:
+                        direct_state[url] = current_state
+                        detailed_status = current_state.get("stock_status", "unknown").upper()
 
-                    if change and not first_run:
-                        print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
-                        time.sleep(1)
-                        verified_state, _ = check_direct_product(url, direct_state.get(url), stats, store_file=url)
-                        if verified_state:
-                            verified_status = verified_state.get("stock_status", "unknown")
+                        if change and not first_run:
+                            print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
+                            time.sleep(1)
+                            verified_state, _ = check_direct_product(url, direct_state.get(url), stats, store_file=file_path)
+                            if verified_state:
+                                verified_status = verified_state.get("stock_status", "unknown")
 
-                            if verified_status in ("in", "preorder"):
-                                direct_state[url]["in_stock"] = True
-                                last_alerted = direct_state[url].get("last_alerted")
-                                if not should_alert(last_alerted):
-                                    print(f"✅ {'PREORDER' if verified_status == 'preorder' else 'IN STOCK'} (no alert)")
+                                if verified_status in ("in", "preorder"):
+                                    direct_state[url]["in_stock"] = True
+                                    last_alerted = direct_state[url].get("last_alerted")
+                                    if not should_alert(last_alerted):
+                                        print(f"✅ {'PREORDER' if verified_status == 'preorder' else 'IN STOCK'} (no alert)")
+                                    else:
+                                        franchise_changes += 1
+                                        is_preorder = verified_status == "preorder"
+                                        print(f"✅ {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
+                                        send_alert(change['name'], change["url"], store_name,
+                                                  is_preorder=is_preorder, is_new=False,
+                                                  store_file=file_path)
+                                        direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
+                                        save_product(url, current_state["name"], True)
+                                        mark_alerted(url)
                                 else:
-                                    franchise_changes += 1
-                                    is_preorder = verified_status == "preorder"
-                                    print(f"✅ {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
-                                    send_alert(change['name'], change["url"], store_name,
-                                              is_preorder=is_preorder, is_new=False,
-                                              store_file=change.get("store_file"))
-                                    direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
-                                    save_product(url, current_state["name"], True)
-                                    mark_alerted(url)
+                                    print(f"❌ Verification failed ({verified_status.upper()})")
+                                    save_product(url, current_state["name"], False)
                             else:
-                                print(f"❌ Verification failed ({verified_status.upper()})")
-                                save_product(url, current_state["name"], False)
+                                print(f"❌ Verification failed (no response)")
                         else:
-                            print(f"❌ Verification failed (no response)")
-                    else:
-                        print(f"{detailed_status}")
+                            print(f"{detailed_status}")
 
-                    prev_in_stock = prev_state.get("in_stock") if prev_state else None
-                    if current_state["in_stock"] != prev_in_stock:
-                        save_product(url, current_state["name"], current_state["in_stock"])
+                        prev_in_stock = prev_state.get("in_stock") if prev_state else None
+                        if current_state["in_stock"] != prev_in_stock:
+                            save_product(url, current_state["name"], current_state["in_stock"])
 
-                time.sleep(random.uniform(2, 4))
+                    time.sleep(random.uniform(2, 4))
 
             print(f"\n📊 {franchise_name}: {franchise_changes} alerts sent")
             print(f"   Stats: {stats['fetched']} fetched, {stats['failed']} failed")
