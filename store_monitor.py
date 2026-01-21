@@ -728,11 +728,11 @@ def main():
                                               is_preorder=is_preorder, is_new=False,
                                               store_file=change.get("store_file"))
                                     direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
-                                    save_product(url, url, current_state["name"], True)
+                                    save_product(url, current_state["name"], True)
                                     mark_alerted(url)
                             else:
                                 print(f"❌ Verification failed ({verified_status.upper()})")
-                                save_product(url, url, current_state["name"], False)
+                                save_product(url, current_state["name"], False)
                         else:
                             print(f"❌ Verification failed (no response)")
                     else:
@@ -740,7 +740,7 @@ def main():
 
                     prev_in_stock = prev_state.get("in_stock") if prev_state else None
                     if current_state["in_stock"] != prev_in_stock:
-                        save_product(url, url, current_state["name"], current_state["in_stock"])
+                        save_product(url, current_state["name"], current_state["in_stock"])
 
                 time.sleep(random.uniform(2, 4))
 
