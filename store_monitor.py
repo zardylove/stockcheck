@@ -56,10 +56,14 @@ FRANCHISES = [
     }
 ]
 
+# Current franchise info for alerts
 CURRENT_FRANCHISE = None
+
+# Current webhook/role for the active file (set during scanning)
 CURRENT_WEBHOOK = None
 CURRENT_ROLE_ID = None
 
+# === OPTIMIZATION: Reusable session for connection pooling ===
 SESSION = requests.Session()
 SESSION.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
@@ -672,6 +676,8 @@ def main():
         total_stats = {'fetched': 0, 'failed': 0}
 
         for franchise in FRANCHISES:
+            global CURRENT_FRANCHISE, CURRENT_WEBHOOK, CURRENT_ROLE_ID
+            CURRENT_FRANCHISE = franchise
             franchise_name = franchise["name"]
             CURRENT_WEBHOOK = None
             CURRENT_ROLE_ID = None
