@@ -270,12 +270,11 @@ def classify_stock(text):
     out_match = OUT_OF_STOCK_PATTERN.search(text_lower)
     in_match = IN_STOCK_PATTERN.search(text_lower)
 
-    if preorder_match:
-        return "preorder"
-    # Check OUT before IN - "sold out" should take priority over "add to cart" 
-    # since many pages have both in templates/JS
+    # OUT takes highest priority - if sold out, nothing else matters
     if out_match:
         return "out"
+    if preorder_match:
+        return "preorder"
     if in_match:
         return "in"
 
