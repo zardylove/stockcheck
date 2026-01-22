@@ -17,16 +17,6 @@ MAX_TIMEOUT = 60
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# === ROTATING USER-AGENTS TO BYPASS 403 ===
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Edg/122.0.0.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
-]
-
 # === FRANCHISE CONFIGURATIONS ===
 FRANCHISES = [
     {
@@ -76,6 +66,9 @@ CURRENT_ROLE_ID = None
 
 # === OPTIMIZATION: Reusable session for connection pooling ===
 SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+})
 
 # === OPTIMIZATION: Failed site cache (skip for 3 minutes) ===
 FAILED_SITES = {}  # {url: failure_time}
@@ -239,17 +232,13 @@ def normalize_product_url(url):
 
 CHECK_INTERVAL = 5
 
-def get_headers():
-    ua = random.choice(USER_AGENTS)
-    return {
-        "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-GB,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+}
+
+MOBILE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
+}
 
 PREORDER_TERMS = [
     "pre-order now", "preorder now", "available for pre-order", "available for preorder",
@@ -496,7 +485,7 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     }
 
     try:
-        r = requests.post(webhook_url, json=data, timeout=10)
+        r = SESSION.post(webhook_url, json=data, timeout=10)
         if r.status_code == 204:
             print(f"✅ Alert sent to {store_file or 'default'}!")
         else:
@@ -506,7 +495,7 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
 
 def confirm_product_stock(product_url):
     try:
-        headers = get_headers()
+        headers = get_headers_for_url(product_url)
         timeout = get_timeout_for_url(product_url)
         r = SESSION.get(product_url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
 
@@ -573,6 +562,25 @@ def confirm_product_stock(product_url):
         print(f"❌ confirm_product_stock error: {e}")
         return "unknown", None, None, None
 
+def get_headers_for_url(url):
+    mobile_sites = [
+        "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
+        "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
+        "johnlewis.com", "hamleys.com",
+        "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
+        "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
+        "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
+        "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
+        "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
+        "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
+        "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
+        "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
+        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk"
+    ]
+    if any(site in url.lower() for site in mobile_sites):
+        return MOBILE_HEADERS
+    return HEADERS
+
 def get_timeout_for_url(url):
     slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
     if any(site in url for site in slow_sites):
@@ -587,7 +595,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         return previous_state, None
 
     try:
-        headers = get_headers()
+        headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
         r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
         if not is_verification:
@@ -696,7 +704,7 @@ def main():
             print(f"{'='*50}")
 
             direct_files = franchise.get("direct_files", [])
-
+            
             if not direct_files:
                 print(f"   No direct files for {franchise_name}")
                 continue
@@ -708,10 +716,10 @@ def main():
             for file_path in direct_files:
                 file_name = file_path.split('/')[-1].replace('.txt', '')
                 file_urls = load_urls([file_path])
-
+                
                 if not file_urls:
                     continue
-
+                
                 # Initialize per-file stats tracking
                 global HOURLY_STATS, DAILY_STATS
                 if file_name not in HOURLY_STATS:
@@ -722,11 +730,11 @@ def main():
                     DAILY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
                 else:
                     DAILY_STATS[file_name]['products'] = len(file_urls)
-
+                
                 file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0}
-
+                
                 print(f"\n📁 {file_name} ({len(file_urls)} products)")
-
+                
                 for url in file_urls:
                     store_name = urlparse(url).netloc
                     print(f"  Checking: {store_name}...", end=" ")
@@ -773,7 +781,7 @@ def main():
                         if current_state["in_stock"] != prev_in_stock:
                             save_product(url, current_state["name"], current_state["in_stock"])
 
-                    time.sleep(random.uniform(5, 10))  # Increased delay to avoid rate limits
+                    time.sleep(random.uniform(2, 4))
 
                 # Accumulate file stats into HOURLY_STATS and DAILY_STATS
                 HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
@@ -782,7 +790,7 @@ def main():
                 DAILY_STATS[file_name]['fetched'] += file_stats['fetched']
                 DAILY_STATS[file_name]['failed'] += file_stats['failed']
                 DAILY_STATS[file_name]['alerts'] += file_stats['alerts']
-
+                
                 # Also accumulate into franchise stats
                 stats['fetched'] += file_stats['fetched']
                 stats['failed'] += file_stats['failed']
@@ -795,7 +803,7 @@ def main():
             total_stats['failed'] += stats['failed']
 
         cycle_time = round(time.time() - cycle_start, 1)
-
+        
         # Increment total scan count
         global TOTAL_SCANS, DAILY_SCANS
         TOTAL_SCANS += 1
@@ -820,5 +828,89 @@ def main():
         global LAST_HOURLY_PING, LAST_DAILY_PING
         now_utc = datetime.now(timezone.utc)
         now_london = now_utc.astimezone(ZoneInfo("Europe/London"))
-        # Immediately use it (even if just for type checking)
-        _ = now_london  # dummy usage to silence the warning
+        current_hour = now_london.strftime("%Y-%m-%d %H")
+        current_day = now_london.strftime("%Y-%m-%d")
+
+        if HOURLY_WEBHOOK := os.getenv("HOURLYDATA"):
+            # Only ping if we're in the first 15 minutes of the hour AND haven't pinged this hour
+            if now_london.minute < 15 and LAST_HOURLY_PING != current_hour:
+                prev_hour = now_london - timedelta(hours=1)
+                time_range = f"{prev_hour.strftime('%H:%M')} - {now_london.strftime('%H:%M')}"
+                
+                # Build file breakdown
+                file_breakdown = ""
+                total_hourly_alerts = 0
+                total_hourly_fetched = 0
+                total_hourly_failed = 0
+                for file_name, stats in sorted(HOURLY_STATS.items()):
+                    file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
+                    total_hourly_alerts += stats['alerts']
+                    total_hourly_fetched += stats['fetched']
+                    total_hourly_failed += stats['failed']
+                
+                hourly_summary = (
+                    f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
+                    f"**Period covered: {time_range}**\n\n"
+                    f"**Overall Stats**\n"
+                    f"• **Products tracked**: {len(direct_state)}\n"
+                    f"• **Full cycle scans completed**: {TOTAL_SCANS}\n"
+                    f"• **Total fetched**: {total_hourly_fetched}\n"
+                    f"• **Total failed**: {total_hourly_failed}\n"
+                    f"• **Alerts sent**: {total_hourly_alerts}\n\n"
+                    f"**Per-File Breakdown**\n{file_breakdown}\n"
+                    f"• **Bot status**: ✅ Active"
+                )
+                try:
+                    requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
+                    print("📤 Sent hourly status ping")
+                    LAST_HOURLY_PING = current_hour
+                    # Reset hourly stats after sending
+                    HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
+                    TOTAL_SCANS = 0
+                except Exception as e:
+                    print(f"⚠️ Hourly ping failed: {e}")
+
+        # === DAILY STATUS PING (at 8:00 AM UK time the following day) ===
+        if DAILY_WEBHOOK := os.getenv("DAILYDATA"):
+            # Trigger at 8:00–8:15 AM UK time AND haven't pinged today
+            if now_london.hour == 8 and now_london.minute < 15 and LAST_DAILY_PING != current_day:
+                yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
+                
+                # Build file breakdown for daily using DAILY_STATS (full day accumulation)
+                daily_file_breakdown = ""
+                daily_total_alerts = 0
+                daily_total_fetched = 0
+                daily_total_failed = 0
+                for file_name, stats in sorted(DAILY_STATS.items()):
+                    daily_file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
+                    daily_total_alerts += stats['alerts']
+                    daily_total_fetched += stats['fetched']
+                    daily_total_failed += stats['failed']
+                
+                daily_summary = (
+                    f"📅 **Daily Bot Report – {yesterday}**\n\n"
+                    f"**Overall Summary**\n"
+                    f"• **Total products tracked**: {len(direct_state)}\n"
+                    f"• **Full cycle scans completed**: {DAILY_SCANS}\n"
+                    f"• **Total fetched**: {daily_total_fetched}\n"
+                    f"• **Total failed**: {daily_total_failed}\n"
+                    f"• **Total alerts sent**: {daily_total_alerts}\n\n"
+                    f"**Per-File Breakdown**\n{daily_file_breakdown}\n"
+                    f"• **Bot status**: ✅ Active\n"
+                    f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+                )
+                try:
+                    requests.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
+                    print("📤 Sent daily status ping (8 AM UK time)")
+                    LAST_DAILY_PING = current_day
+                    # Reset daily stats after sending
+                    DAILY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in DAILY_STATS.items()}
+                    DAILY_SCANS = 0
+                except Exception as e:
+                    print(f"⚠️ Daily ping failed: {e}")
+
+        print(f"⏱️ Next scan in {CHECK_INTERVAL} seconds...\n")
+        time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    main()
