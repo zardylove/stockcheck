@@ -78,6 +78,10 @@ FAILURE_COOLDOWN_MINUTES = 3
 LAST_HOURLY_PING = None  # Track last hour we sent a ping
 LAST_DAILY_PING = None   # Track last day we sent a ping
 
+# === STATS TRACKING FOR HOURLY/DAILY PINGS ===
+HOURLY_STATS = {}  # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}}
+TOTAL_SCANS = 0    # Total scan cycles completed
+
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
 JS_SKIP_MINUTES = 5
@@ -709,6 +713,15 @@ def main():
                 if not file_urls:
                     continue
                 
+                # Initialize per-file stats tracking
+                global HOURLY_STATS
+                if file_name not in HOURLY_STATS:
+                    HOURLY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
+                else:
+                    HOURLY_STATS[file_name]['products'] = len(file_urls)
+                
+                file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0}
+                
                 print(f"\n📁 {file_name} ({len(file_urls)} products)")
                 
                 for url in file_urls:
@@ -716,7 +729,7 @@ def main():
                     print(f"  Checking: {store_name}...", end=" ")
 
                     prev_state = direct_state.get(url)
-                    current_state, change = check_direct_product(url, prev_state, stats, store_file=file_path)
+                    current_state, change = check_direct_product(url, prev_state, file_stats, store_file=file_path)
 
                     if current_state:
                         direct_state[url] = current_state
@@ -725,7 +738,7 @@ def main():
                         if change and not first_run:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
                             time.sleep(1)
-                            verified_state, _ = check_direct_product(url, direct_state.get(url), stats, store_file=file_path)
+                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path)
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
 
@@ -736,6 +749,7 @@ def main():
                                         print(f"✅ {'PREORDER' if verified_status == 'preorder' else 'IN STOCK'} (no alert)")
                                     else:
                                         franchise_changes += 1
+                                        file_stats['alerts'] += 1
                                         is_preorder = verified_status == "preorder"
                                         print(f"✅ {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
                                         send_alert(change['name'], change["url"], store_name,
@@ -758,6 +772,15 @@ def main():
 
                     time.sleep(random.uniform(2, 4))
 
+                # Accumulate file stats into HOURLY_STATS
+                HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
+                HOURLY_STATS[file_name]['failed'] += file_stats['failed']
+                HOURLY_STATS[file_name]['alerts'] += file_stats['alerts']
+                
+                # Also accumulate into franchise stats
+                stats['fetched'] += file_stats['fetched']
+                stats['failed'] += file_stats['failed']
+
             print(f"\n📊 {franchise_name}: {franchise_changes} alerts sent")
             print(f"   Stats: {stats['fetched']} fetched, {stats['failed']} failed")
 
@@ -766,6 +789,10 @@ def main():
             total_stats['failed'] += stats['failed']
 
         cycle_time = round(time.time() - cycle_start, 1)
+        
+        # Increment total scan count
+        global TOTAL_SCANS
+        TOTAL_SCANS += 1
 
         if first_run:
             print(f"\n{'='*50}")
@@ -795,20 +822,36 @@ def main():
                 prev_hour = now_london - timedelta(hours=1)
                 time_range = f"{prev_hour.strftime('%H:%M')} - {now_london.strftime('%H:%M')}"
                 
+                # Build file breakdown
+                file_breakdown = ""
+                total_hourly_alerts = 0
+                total_hourly_fetched = 0
+                total_hourly_failed = 0
+                for file_name, stats in sorted(HOURLY_STATS.items()):
+                    file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
+                    total_hourly_alerts += stats['alerts']
+                    total_hourly_fetched += stats['fetched']
+                    total_hourly_failed += stats['failed']
+                
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%Y-%m-%d %H:00 UK time')})\n"
                     f"**Period covered: {time_range}**\n\n"
+                    f"**Overall Stats**\n"
                     f"• **Products tracked**: {len(direct_state)}\n"
-                    f"• **Last cycle fetched**: {total_stats['fetched']}\n"
-                    f"• **Last cycle failed**: {total_stats['failed']}\n"
-                    f"• **Alerts sent this cycle**: {total_cycle_changes}\n"
-                    f"• **Last full cycle time**: {cycle_time:.1f} seconds\n"
+                    f"• **Scans completed**: {TOTAL_SCANS}\n"
+                    f"• **Total fetched**: {total_hourly_fetched}\n"
+                    f"• **Total failed**: {total_hourly_failed}\n"
+                    f"• **Alerts sent**: {total_hourly_alerts}\n\n"
+                    f"**Per-File Breakdown**\n{file_breakdown}\n"
                     f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds"
                 )
                 try:
                     requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
                     print("📤 Sent hourly status ping")
                     LAST_HOURLY_PING = current_hour
+                    # Reset hourly stats after sending
+                    HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
+                    TOTAL_SCANS = 0
                 except Exception as e:
                     print(f"⚠️ Hourly ping failed: {e}")
 
@@ -818,15 +861,27 @@ def main():
             if now_london.hour == 8 and now_london.minute < 2 and LAST_DAILY_PING != current_day:
                 yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
                 
+                # Build file breakdown for daily
+                daily_file_breakdown = ""
+                daily_total_alerts = 0
+                daily_total_fetched = 0
+                daily_total_failed = 0
+                for file_name, stats in sorted(HOURLY_STATS.items()):
+                    daily_file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
+                    daily_total_alerts += stats['alerts']
+                    daily_total_fetched += stats['fetched']
+                    daily_total_failed += stats['failed']
+                
                 daily_summary = (
                     f"📅 **Daily Bot Report – {yesterday}**\n\n"
                     f"**Overall Summary**\n"
                     f"• **Total products tracked**: {len(direct_state)}\n"
-                    f"• **Total full scans completed**: {total_stats['fetched']}\n"
-                    f"• **Total alerts sent yesterday**: {total_cycle_changes}\n"
-                    f"• **Total failed requests yesterday**: {total_stats['failed']}\n\n"
+                    f"• **Total scans completed**: {TOTAL_SCANS}\n"
+                    f"• **Total fetched**: {daily_total_fetched}\n"
+                    f"• **Total failed**: {daily_total_failed}\n"
+                    f"• **Total alerts sent**: {daily_total_alerts}\n\n"
+                    f"**Per-File Breakdown**\n{daily_file_breakdown}\n"
                     f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds\n"
-                    f"• **Average cycle time yesterday**: {cycle_time:.1f} seconds\n"
                     f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
                 )
                 try:
