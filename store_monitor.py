@@ -822,8 +822,8 @@ def main():
         current_day = now_london.strftime("%Y-%m-%d")
 
         if HOURLY_WEBHOOK := os.getenv("HOURLYDATA"):
-            # Only ping if we're in the first 2 minutes of the hour AND haven't pinged this hour
-            if now_london.minute < 2 and LAST_HOURLY_PING != current_hour:
+            # Only ping if we're in the first 5 minutes of the hour AND haven't pinged this hour
+            if now_london.minute < 5 and LAST_HOURLY_PING != current_hour:
                 prev_hour = now_london - timedelta(hours=1)
                 time_range = f"{prev_hour.strftime('%H:%M')} - {now_london.strftime('%H:%M')}"
                 
@@ -862,8 +862,8 @@ def main():
 
         # === DAILY STATUS PING (at 8:00 AM UK time the following day) ===
         if DAILY_WEBHOOK := os.getenv("DAILYDATA"):
-            # Trigger at 8:00–8:02 AM UK time AND haven't pinged today
-            if now_london.hour == 8 and now_london.minute < 2 and LAST_DAILY_PING != current_day:
+            # Trigger at 8:00–8:05 AM UK time AND haven't pinged today
+            if now_london.hour == 8 and now_london.minute < 5 and LAST_DAILY_PING != current_day:
                 yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
                 
                 # Build file breakdown for daily
