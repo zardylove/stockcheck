@@ -9,6 +9,7 @@ from psycopg2 import pool
 import traceback
 from urllib.parse import urljoin, urlparse, urlunparse
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 # === DATABASE CONNECTION POOL ===
 DB_POOL = None
@@ -72,6 +73,10 @@ SESSION.headers.update({
 # === OPTIMIZATION: Failed site cache (skip for 3 minutes) ===
 FAILED_SITES = {}  # {url: failure_time}
 FAILURE_COOLDOWN_MINUTES = 3
+
+# === HOURLY/DAILY PING TRACKING ===
+LAST_HOURLY_PING = None  # Track last hour we sent a ping
+LAST_DAILY_PING = None   # Track last day we sent a ping
 
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
@@ -776,6 +781,61 @@ def main():
                 print(f"📊 Cycle complete. No changes detected.")
 
         print(f"📈 Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | Cycle: {cycle_time}s")
+
+        # === HOURLY STATUS PING (exactly on the hour in London/UK time) ===
+        global LAST_HOURLY_PING, LAST_DAILY_PING
+        now_utc = datetime.now(timezone.utc)
+        now_london = now_utc.astimezone(ZoneInfo("Europe/London"))
+        current_hour = now_london.strftime("%Y-%m-%d %H")
+        current_day = now_london.strftime("%Y-%m-%d")
+
+        if HOURLY_WEBHOOK := os.getenv("HOURLYDATA"):
+            # Only ping if we're in the first 2 minutes of the hour AND haven't pinged this hour
+            if now_london.minute < 2 and LAST_HOURLY_PING != current_hour:
+                prev_hour = now_london - timedelta(hours=1)
+                time_range = f"{prev_hour.strftime('%H:%M')} - {now_london.strftime('%H:%M')}"
+                
+                hourly_summary = (
+                    f"🟢 **Hourly Bot Status** ({now_london.strftime('%Y-%m-%d %H:00 UK time')})\n"
+                    f"**Period covered: {time_range}**\n\n"
+                    f"• **Products tracked**: {len(direct_state)}\n"
+                    f"• **Last cycle fetched**: {total_stats['fetched']}\n"
+                    f"• **Last cycle failed**: {total_stats['failed']}\n"
+                    f"• **Alerts sent this cycle**: {total_cycle_changes}\n"
+                    f"• **Last full cycle time**: {cycle_time:.1f} seconds\n"
+                    f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds"
+                )
+                try:
+                    requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
+                    print("📤 Sent hourly status ping")
+                    LAST_HOURLY_PING = current_hour
+                except Exception as e:
+                    print(f"⚠️ Hourly ping failed: {e}")
+
+        # === DAILY STATUS PING (at 8:00 AM UK time the following day) ===
+        if DAILY_WEBHOOK := os.getenv("DAILYDATA"):
+            # Trigger at 8:00–8:02 AM UK time AND haven't pinged today
+            if now_london.hour == 8 and now_london.minute < 2 and LAST_DAILY_PING != current_day:
+                yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
+                
+                daily_summary = (
+                    f"📅 **Daily Bot Report – {yesterday}**\n\n"
+                    f"**Overall Summary**\n"
+                    f"• **Total products tracked**: {len(direct_state)}\n"
+                    f"• **Total full scans completed**: {total_stats['fetched']}\n"
+                    f"• **Total alerts sent yesterday**: {total_cycle_changes}\n"
+                    f"• **Total failed requests yesterday**: {total_stats['failed']}\n\n"
+                    f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds\n"
+                    f"• **Average cycle time yesterday**: {cycle_time:.1f} seconds\n"
+                    f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+                )
+                try:
+                    requests.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
+                    print("📤 Sent daily status ping (8 AM UK time)")
+                    LAST_DAILY_PING = current_day
+                except Exception as e:
+                    print(f"⚠️ Daily ping failed: {e}")
+
         print(f"⏱️ Next scan in {CHECK_INTERVAL} seconds...\n")
         time.sleep(CHECK_INTERVAL)
 
