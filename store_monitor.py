@@ -843,7 +843,7 @@ def main():
                     f"• **Total failed**: {total_hourly_failed}\n"
                     f"• **Alerts sent**: {total_hourly_alerts}\n\n"
                     f"**Per-File Breakdown**\n{file_breakdown}\n"
-                    f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds"
+                    f"• **Bot status**: ✅ Active"
                 )
                 try:
                     requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
@@ -881,7 +881,7 @@ def main():
                     f"• **Total failed**: {daily_total_failed}\n"
                     f"• **Total alerts sent**: {daily_total_alerts}\n\n"
                     f"**Per-File Breakdown**\n{daily_file_breakdown}\n"
-                    f"• **Bot status**: Alive and scanning every {CHECK_INTERVAL} seconds\n"
+                    f"• **Bot status**: ✅ Active\n"
                     f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
                 )
                 try:
