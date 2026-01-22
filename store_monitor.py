@@ -17,16 +17,6 @@ MAX_TIMEOUT = 60
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# === ROTATING USER-AGENTS TO BYPASS 403 ===
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Edg/122.0.0.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1"
-]
-
 # === FRANCHISE CONFIGURATIONS ===
 FRANCHISES = [
     {
@@ -242,21 +232,13 @@ def normalize_product_url(url):
 
 CHECK_INTERVAL = 5
 
-def get_rotating_headers():
-    """Get headers with a randomly selected user-agent to bypass 403s"""
-    return {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-GB,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36"
+}
 
-# Legacy fallbacks (now both use rotating)
-HEADERS = get_rotating_headers()
-MOBILE_HEADERS = get_rotating_headers()
+MOBILE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
+}
 
 PREORDER_TERMS = [
     "pre-order now", "preorder now", "available for pre-order", "available for preorder",
@@ -581,8 +563,23 @@ def confirm_product_stock(product_url):
         return "unknown", None, None, None
 
 def get_headers_for_url(url):
-    """Get rotating headers for each request (helps bypass 403s)"""
-    return get_rotating_headers()
+    mobile_sites = [
+        "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
+        "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
+        "johnlewis.com", "hamleys.com",
+        "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
+        "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
+        "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
+        "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
+        "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
+        "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
+        "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
+        "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
+        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk"
+    ]
+    if any(site in url.lower() for site in mobile_sites):
+        return MOBILE_HEADERS
+    return HEADERS
 
 def get_timeout_for_url(url):
     slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
