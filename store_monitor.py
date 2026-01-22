@@ -80,7 +80,9 @@ LAST_DAILY_PING = None   # Track last day we sent a ping
 
 # === STATS TRACKING FOR HOURLY/DAILY PINGS ===
 HOURLY_STATS = {}  # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}}
-TOTAL_SCANS = 0    # Total scan cycles completed
+DAILY_STATS = {}   # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}} - accumulates all day
+TOTAL_SCANS = 0    # Total scan cycles completed (resets hourly)
+DAILY_SCANS = 0    # Total scan cycles completed (resets daily)
 
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
@@ -719,11 +721,15 @@ def main():
                     continue
                 
                 # Initialize per-file stats tracking
-                global HOURLY_STATS
+                global HOURLY_STATS, DAILY_STATS
                 if file_name not in HOURLY_STATS:
                     HOURLY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
                 else:
                     HOURLY_STATS[file_name]['products'] = len(file_urls)
+                if file_name not in DAILY_STATS:
+                    DAILY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
+                else:
+                    DAILY_STATS[file_name]['products'] = len(file_urls)
                 
                 file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0}
                 
@@ -777,10 +783,13 @@ def main():
 
                     time.sleep(random.uniform(2, 4))
 
-                # Accumulate file stats into HOURLY_STATS
+                # Accumulate file stats into HOURLY_STATS and DAILY_STATS
                 HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
                 HOURLY_STATS[file_name]['failed'] += file_stats['failed']
                 HOURLY_STATS[file_name]['alerts'] += file_stats['alerts']
+                DAILY_STATS[file_name]['fetched'] += file_stats['fetched']
+                DAILY_STATS[file_name]['failed'] += file_stats['failed']
+                DAILY_STATS[file_name]['alerts'] += file_stats['alerts']
                 
                 # Also accumulate into franchise stats
                 stats['fetched'] += file_stats['fetched']
@@ -796,8 +805,9 @@ def main():
         cycle_time = round(time.time() - cycle_start, 1)
         
         # Increment total scan count
-        global TOTAL_SCANS
+        global TOTAL_SCANS, DAILY_SCANS
         TOTAL_SCANS += 1
+        DAILY_SCANS += 1
 
         if first_run:
             print(f"\n{'='*50}")
@@ -866,12 +876,12 @@ def main():
             if now_london.hour == 8 and now_london.minute < 15 and LAST_DAILY_PING != current_day:
                 yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
                 
-                # Build file breakdown for daily
+                # Build file breakdown for daily using DAILY_STATS (full day accumulation)
                 daily_file_breakdown = ""
                 daily_total_alerts = 0
                 daily_total_fetched = 0
                 daily_total_failed = 0
-                for file_name, stats in sorted(HOURLY_STATS.items()):
+                for file_name, stats in sorted(DAILY_STATS.items()):
                     daily_file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
                     daily_total_alerts += stats['alerts']
                     daily_total_fetched += stats['fetched']
@@ -881,7 +891,7 @@ def main():
                     f"📅 **Daily Bot Report – {yesterday}**\n\n"
                     f"**Overall Summary**\n"
                     f"• **Total products tracked**: {len(direct_state)}\n"
-                    f"• **Full cycle scans completed**: {TOTAL_SCANS}\n"
+                    f"• **Full cycle scans completed**: {DAILY_SCANS}\n"
                     f"• **Total fetched**: {daily_total_fetched}\n"
                     f"• **Total failed**: {daily_total_failed}\n"
                     f"• **Total alerts sent**: {daily_total_alerts}\n\n"
@@ -893,6 +903,9 @@ def main():
                     requests.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
                     print("📤 Sent daily status ping (8 AM UK time)")
                     LAST_DAILY_PING = current_day
+                    # Reset daily stats after sending
+                    DAILY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in DAILY_STATS.items()}
+                    DAILY_SCANS = 0
                 except Exception as e:
                     print(f"⚠️ Daily ping failed: {e}")
 
