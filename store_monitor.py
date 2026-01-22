@@ -819,4 +819,6 @@ def main():
         # === HOURLY STATUS PING (exactly on the hour in London/UK time) ===
         global LAST_HOURLY_PING, LAST_DAILY_PING
         now_utc = datetime.now(timezone.utc)
-        now_london = now_utc.astimezone(
+        now_london = now_utc.astimezone(ZoneInfo("Europe/London"))
+        # Immediately use it (even if just for type checking)
+        _ = now_london  # dummy usage to silence the warning
