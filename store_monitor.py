@@ -585,22 +585,25 @@ def get_timeout_for_url(url):
         return 30
     return 15
 
-def check_direct_product(url, previous_state, stats, store_file=None):
+def check_direct_product(url, previous_state, stats, store_file=None, is_verification=False):
     if is_site_in_failure_cooldown(url):
         print(f"⏭️ SKIPPED (failed recently)")
-        stats['skipped'] += 1
+        if not is_verification:
+            stats['skipped'] += 1
         return previous_state, None
 
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
         r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
-        stats['fetched'] += 1
+        if not is_verification:
+            stats['fetched'] += 1
 
         if r.status_code != 200:
             print(f"⚠️ Failed ({r.status_code})")
             mark_site_failed(url)
-            stats['failed'] += 1
+            if not is_verification:
+                stats['failed'] += 1
             return previous_state, None
 
         soup = BeautifulSoup(r.text, "html.parser")
@@ -646,12 +649,14 @@ def check_direct_product(url, previous_state, stats, store_file=None):
     except requests.exceptions.Timeout:
         print(f"⏱️ TIMEOUT")
         mark_site_failed(url)
-        stats['failed'] += 1
+        if not is_verification:
+            stats['failed'] += 1
         return previous_state, None
     except Exception as e:
         print(f"❌ Error checking direct product {url}: {e}")
         mark_site_failed(url)
-        stats['failed'] += 1
+        if not is_verification:
+            stats['failed'] += 1
         return previous_state, None
 
 def main():
@@ -738,7 +743,7 @@ def main():
                         if change and not first_run:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
                             time.sleep(1)
-                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path)
+                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path, is_verification=True)
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
 
