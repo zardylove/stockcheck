@@ -849,7 +849,7 @@ def main():
                     total_hourly_failed += stats['failed']
                 
                 hourly_summary = (
-                    f"🟢 **Hourly Bot Status** ({now_london.strftime('%Y-%m-%d %H:00 UK time')})\n"
+                    f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
                     f"**Period covered: {time_range}**\n\n"
                     f"**Overall Stats**\n"
                     f"• **Products tracked**: {len(direct_state)}\n"
