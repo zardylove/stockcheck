@@ -291,10 +291,10 @@ def classify_stock(text):
         match_pos = in_match.end()
         after_match = text_lower[match_pos:match_pos+10] if match_pos < len(text_lower) else ""
         if match_text == "in stock" and ("items" in after_match or "item" in after_match):
-            return "unknown"
+            return "out"
         return "in"
 
-    return "unknown"
+    return "out"
 
 def is_site_in_failure_cooldown(url):
     if url not in FAILED_SITES:
