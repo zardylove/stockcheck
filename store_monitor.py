@@ -371,7 +371,7 @@ def load_direct_state():
             return_db_connection(conn)
     return direct_state
 
-def save_product(product_url, product_name, in_stock):
+def save_product(product_url, product_name, in_stock, retry=True):
     conn = None
     try:
         conn = get_db_connection()
@@ -388,9 +388,16 @@ def save_product(product_url, product_name, in_stock):
         cur.close()
         return_db_connection(conn)
     except Exception as e:
-        print(f"⚠️ Error saving product: {e}")
         if conn:
-            return_db_connection(conn)
+            try:
+                conn.close()
+            except:
+                pass
+        if retry and "SSL" in str(e):
+            time.sleep(1)
+            save_product(product_url, product_name, in_stock, retry=False)
+        else:
+            print(f"⚠️ Error saving product: {e}")
 
 def mark_alerted(product_url):
     conn = None
