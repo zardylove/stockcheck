@@ -807,7 +807,7 @@ def main():
 
                         if change and not first_run:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
-                            time.sleep(1)
+                            time.sleep(5)
                             verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path, is_verification=True)
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
