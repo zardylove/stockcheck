@@ -203,6 +203,12 @@ def init_database():
             )
         """)
         cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_alerted TIMESTAMP")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ping_state (
+                ping_type TEXT PRIMARY KEY,
+                last_ping TEXT
+            )
+        """)
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -213,6 +219,46 @@ def init_database():
         if conn:
             return_db_connection(conn)
         return False
+
+def load_ping_state():
+    global LAST_HOURLY_PING, LAST_DAILY_PING
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT ping_type, last_ping FROM ping_state")
+        rows = cur.fetchall()
+        for ping_type, last_ping in rows:
+            if ping_type == "hourly":
+                LAST_HOURLY_PING = last_ping
+            elif ping_type == "daily":
+                LAST_DAILY_PING = last_ping
+        cur.close()
+        return_db_connection(conn)
+        if LAST_HOURLY_PING or LAST_DAILY_PING:
+            print(f"📂 Loaded ping state: hourly={LAST_HOURLY_PING}, daily={LAST_DAILY_PING}")
+    except Exception as e:
+        print(f"⚠️ Error loading ping state: {e}")
+        if conn:
+            return_db_connection(conn)
+
+def save_ping_state(ping_type, value):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO ping_state (ping_type, last_ping)
+            VALUES (%s, %s)
+            ON CONFLICT (ping_type) DO UPDATE SET last_ping = EXCLUDED.last_ping
+        """, (ping_type, value))
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+    except Exception as e:
+        print(f"⚠️ Error saving ping state: {e}")
+        if conn:
+            return_db_connection(conn)
 
 def normalize_product_url(url):
     try:
@@ -687,6 +733,7 @@ def main():
     if not init_database():
         print("❌ Database init failed. Exiting.")
         return
+    load_ping_state()
 
     direct_state = load_direct_state()
     first_run = len(direct_state) == 0
@@ -876,6 +923,7 @@ def main():
                     requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
                     print("📤 Sent hourly status ping")
                     LAST_HOURLY_PING = current_hour
+                    save_ping_state("hourly", current_hour)
                     # Reset hourly stats after sending
                     HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
                     TOTAL_SCANS = 0
@@ -915,6 +963,7 @@ def main():
                     requests.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
                     print("📤 Sent daily status ping (8 AM UK time)")
                     LAST_DAILY_PING = current_day
+                    save_ping_state("daily", current_day)
                     # Reset daily stats after sending
                     DAILY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in DAILY_STATS.items()}
                     DAILY_SCANS = 0
