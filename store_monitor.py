@@ -656,8 +656,6 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
         r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
-        if not is_verification:
-            stats['fetched'] += 1
 
         if r.status_code != 200:
             print(f"⚠️ Failed ({r.status_code})")
@@ -665,6 +663,9 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
             if not is_verification:
                 stats['failed'] += 1
             return previous_state, None
+        
+        if not is_verification:
+            stats['fetched'] += 1
 
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
