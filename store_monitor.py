@@ -671,12 +671,12 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
 
         if r.status_code != 200:
             domain = urlparse(url).netloc
-            product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
+            file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
             print(f"⚠️ Failed ({r.status_code})")
             mark_site_failed(url)
             if not is_verification:
                 stats['failed'] += 1
-                HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": f"HTTP {r.status_code}"})
+                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {r.status_code}"})
             return previous_state, None
         
         if not is_verification:
@@ -724,21 +724,21 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
 
     except requests.exceptions.Timeout:
         domain = urlparse(url).netloc
-        product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
+        file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
         print(f"⏱️ TIMEOUT")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": "Timeout"})
+            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Timeout"})
         return previous_state, None
     except Exception as e:
         domain = urlparse(url).netloc
-        product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
+        file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
         print(f"❌ Error checking direct product {url}: {e}")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": str(e)[:50]})
+            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": str(e)[:50]})
         return previous_state, None
 
 def main():
@@ -934,7 +934,7 @@ def main():
                 if HOURLY_FAILED_DETAILS:
                     failed_sites_text = f"\n**Failed Requests ({len(HOURLY_FAILED_DETAILS)} total)**\n"
                     for fail in HOURLY_FAILED_DETAILS:
-                        failed_sites_text += f"  • {fail['url']} | {fail['product']} | {fail['reason']}\n"
+                        failed_sites_text += f"  • {fail['url']} | {fail['file']} | {fail['reason']}\n"
                 
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
