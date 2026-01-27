@@ -83,6 +83,7 @@ HOURLY_STATS = {}  # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}}
 DAILY_STATS = {}   # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}} - accumulates all day
 TOTAL_SCANS = 0    # Total scan cycles completed (resets hourly)
 DAILY_SCANS = 0    # Total scan cycles completed (resets daily)
+HOURLY_FAILED_SITES = {}  # {site_domain: count} - tracks which sites failed this hour
 
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
@@ -658,10 +659,12 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
 
         if r.status_code != 200:
+            domain = urlparse(url).netloc
             print(f"⚠️ Failed ({r.status_code})")
             mark_site_failed(url)
             if not is_verification:
                 stats['failed'] += 1
+                HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
             return previous_state, None
         
         if not is_verification:
@@ -708,16 +711,20 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         return current_state, change
 
     except requests.exceptions.Timeout:
+        domain = urlparse(url).netloc
         print(f"⏱️ TIMEOUT")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
+            HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
         return previous_state, None
     except Exception as e:
+        domain = urlparse(url).netloc
         print(f"❌ Error checking direct product {url}: {e}")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
+            HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
         return previous_state, None
 
 def main():
@@ -908,6 +915,14 @@ def main():
                     total_hourly_fetched += stats['fetched']
                     total_hourly_failed += stats['failed']
                 
+                # Build failed sites breakdown
+                failed_sites_text = ""
+                if HOURLY_FAILED_SITES:
+                    sorted_fails = sorted(HOURLY_FAILED_SITES.items(), key=lambda x: x[1], reverse=True)[:10]
+                    failed_sites_text = "\n**Failed Sites (top 10)**\n"
+                    for domain, count in sorted_fails:
+                        failed_sites_text += f"  • {domain}: {count} fails\n"
+                
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
                     f"**Period covered: {time_range}**\n\n"
@@ -917,7 +932,8 @@ def main():
                     f"• **Total fetched**: {total_hourly_fetched}\n"
                     f"• **Total failed**: {total_hourly_failed}\n"
                     f"• **Alerts sent**: {total_hourly_alerts}\n\n"
-                    f"**Per-File Breakdown**\n{file_breakdown}\n"
+                    f"**Per-File Breakdown**\n{file_breakdown}"
+                    f"{failed_sites_text}\n"
                     f"• **Bot status**: ✅ Active"
                 )
                 try:
@@ -927,6 +943,7 @@ def main():
                     save_ping_state("hourly", current_hour)
                     # Reset hourly stats after sending
                     HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
+                    HOURLY_FAILED_SITES.clear()
                     TOTAL_SCANS = 0
                 except Exception as e:
                     print(f"⚠️ Hourly ping failed: {e}")
