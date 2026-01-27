@@ -848,7 +848,7 @@ def main():
                         if current_state["in_stock"] != prev_in_stock:
                             save_product(url, current_state["name"], current_state["in_stock"])
 
-                    time.sleep(random.uniform(2, 4))
+                    time.sleep(1)
 
                 # Accumulate file stats into HOURLY_STATS and DAILY_STATS
                 HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
