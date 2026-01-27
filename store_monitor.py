@@ -21,6 +21,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 FRANCHISES = [
     {
         "name": "Pokemon",
+        "role_id": os.getenv("POKEMON_ROLE"),
         "direct_files": [
             "Pokemon/Poke-30A.txt",
             "Pokemon/Poke-AH.txt",
@@ -29,15 +30,16 @@ FRANCHISES = [
             "Pokemon/Poke-PO.txt"
         ],
         "webhook_secrets": [
-            {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A"), "role_id": os.getenv("POKE30A_ROLE")},
-            {"file": "Pokemon/Poke-AH.txt", "webhook": os.getenv("POKEAH"), "role_id": os.getenv("POKEAH_ROLE")},
-            {"file": "Pokemon/Poke-DR.txt", "webhook": os.getenv("POKEDR"), "role_id": os.getenv("POKEDR_ROLE")},
-            {"file": "Pokemon/Poke-ME.txt", "webhook": os.getenv("POKEME"), "role_id": os.getenv("POKEME_ROLE")},
-            {"file": "Pokemon/Poke-PO.txt", "webhook": os.getenv("POKEPO"), "role_id": os.getenv("POKEPO_ROLE")},
+            {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A")},
+            {"file": "Pokemon/Poke-AH.txt", "webhook": os.getenv("POKEAH")},
+            {"file": "Pokemon/Poke-DR.txt", "webhook": os.getenv("POKEDR")},
+            {"file": "Pokemon/Poke-ME.txt", "webhook": os.getenv("POKEME")},
+            {"file": "Pokemon/Poke-PO.txt", "webhook": os.getenv("POKEPO")},
         ]
     },
     {
         "name": "One Piece",
+        "role_id": os.getenv("ONEPIECE_ROLE"),
         "direct_files": [
             "One Piece/EB-02.txt",
             "One Piece/EB-03.txt",
@@ -47,12 +49,12 @@ FRANCHISES = [
             "One Piece/OP-14.txt"
         ],
         "webhook_secrets": [
-            {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02"), "role_id": os.getenv("EB02_ROLE")},
-            {"file": "One Piece/EB-03.txt", "webhook": os.getenv("EB03"), "role_id": os.getenv("EB03_ROLE")},
-            {"file": "One Piece/IB-V5.txt", "webhook": os.getenv("IBV5"), "role_id": os.getenv("IBV5_ROLE")},
-            {"file": "One Piece/IB-V6.txt", "webhook": os.getenv("IBV6"), "role_id": os.getenv("IBV6_ROLE")},
-            {"file": "One Piece/OP-13.txt", "webhook": os.getenv("OP13"), "role_id": os.getenv("OP13_ROLE")},
-            {"file": "One Piece/OP-14.txt", "webhook": os.getenv("OP14"), "role_id": os.getenv("OP14_ROLE")},
+            {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02")},
+            {"file": "One Piece/EB-03.txt", "webhook": os.getenv("EB03")},
+            {"file": "One Piece/IB-V5.txt", "webhook": os.getenv("IBV5")},
+            {"file": "One Piece/IB-V6.txt", "webhook": os.getenv("IBV6")},
+            {"file": "One Piece/OP-13.txt", "webhook": os.getenv("OP13")},
+            {"file": "One Piece/OP-14.txt", "webhook": os.getenv("OP14")},
         ]
     }
 ]
@@ -491,12 +493,12 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     for group in CURRENT_FRANCHISE.get("webhook_secrets", []):
         if store_file and group["file"] == store_file:
             webhook_url = group["webhook"]
-            role_id = group["role_id"]
             break
+
+    role_id = CURRENT_FRANCHISE.get("role_id")
 
     if webhook_url is None:
         webhook_url = CURRENT_WEBHOOK
-        role_id = CURRENT_ROLE_ID
 
     if webhook_url is None:
         print("Warning: No webhook for this file/group")
