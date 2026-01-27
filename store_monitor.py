@@ -798,7 +798,7 @@ def main():
                 else:
                     DAILY_STATS[file_name]['products'] = len(file_urls)
                 
-                file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0}
+                file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0, 'skipped': 0}
                 
                 print(f"\n📁 {file_name} ({len(file_urls)} products)")
                 
