@@ -246,22 +246,31 @@ def load_ping_state():
             return_db_connection(conn)
 
 def save_ping_state(ping_type, value):
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO ping_state (ping_type, last_ping)
-            VALUES (%s, %s)
-            ON CONFLICT (ping_type) DO UPDATE SET last_ping = EXCLUDED.last_ping
-        """, (ping_type, value))
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-    except Exception as e:
-        print(f"⚠️ Error saving ping state: {e}")
-        if conn:
+    for attempt in range(3):
+        conn = None
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO ping_state (ping_type, last_ping)
+                VALUES (%s, %s)
+                ON CONFLICT (ping_type) DO UPDATE SET last_ping = EXCLUDED.last_ping
+            """, (ping_type, value))
+            conn.commit()
+            cur.close()
             return_db_connection(conn)
+            return
+        except Exception as e:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            if attempt < 2:
+                time.sleep(1)
+                init_db_pool()
+            else:
+                print(f"⚠️ Error saving ping state: {e}")
 
 def normalize_product_url(url):
     try:
