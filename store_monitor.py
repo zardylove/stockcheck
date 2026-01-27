@@ -85,7 +85,7 @@ HOURLY_STATS = {}  # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}}
 DAILY_STATS = {}   # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}} - accumulates all day
 TOTAL_SCANS = 0    # Total scan cycles completed (resets hourly)
 DAILY_SCANS = 0    # Total scan cycles completed (resets daily)
-HOURLY_FAILED_SITES = {}  # {site_domain: count} - tracks which sites failed this hour
+HOURLY_FAILED_DETAILS = []  # List of {url, product, reason} - tracks all failures this hour
 
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
@@ -671,11 +671,12 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
 
         if r.status_code != 200:
             domain = urlparse(url).netloc
+            product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
             print(f"⚠️ Failed ({r.status_code})")
             mark_site_failed(url)
             if not is_verification:
                 stats['failed'] += 1
-                HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
+                HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": f"HTTP {r.status_code}"})
             return previous_state, None
         
         if not is_verification:
@@ -723,19 +724,21 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
 
     except requests.exceptions.Timeout:
         domain = urlparse(url).netloc
+        product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
         print(f"⏱️ TIMEOUT")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
+            HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": "Timeout"})
         return previous_state, None
     except Exception as e:
         domain = urlparse(url).netloc
+        product_name = previous_state.get("name") if previous_state else urlparse(url).path.split('/')[-1].replace('-', ' ')[:50]
         print(f"❌ Error checking direct product {url}: {e}")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            HOURLY_FAILED_SITES[domain] = HOURLY_FAILED_SITES.get(domain, 0) + 1
+            HOURLY_FAILED_DETAILS.append({"url": domain, "product": product_name, "reason": str(e)[:50]})
         return previous_state, None
 
 def main():
@@ -928,11 +931,10 @@ def main():
                 
                 # Build failed sites breakdown
                 failed_sites_text = ""
-                if HOURLY_FAILED_SITES:
-                    sorted_fails = sorted(HOURLY_FAILED_SITES.items(), key=lambda x: x[1], reverse=True)[:10]
-                    failed_sites_text = "\n**Failed Sites (top 10)**\n"
-                    for domain, count in sorted_fails:
-                        failed_sites_text += f"  • {domain}: {count} fails\n"
+                if HOURLY_FAILED_DETAILS:
+                    failed_sites_text = f"\n**Failed Requests ({len(HOURLY_FAILED_DETAILS)} total)**\n"
+                    for fail in HOURLY_FAILED_DETAILS:
+                        failed_sites_text += f"  • {fail['url']} | {fail['product']} | {fail['reason']}\n"
                 
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
@@ -954,7 +956,7 @@ def main():
                     save_ping_state("hourly", current_hour)
                     # Reset hourly stats after sending
                     HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
-                    HOURLY_FAILED_SITES.clear()
+                    HOURLY_FAILED_DETAILS.clear()
                     TOTAL_SCANS = 0
                 except Exception as e:
                     print(f"⚠️ Hourly ping failed: {e}")
