@@ -308,14 +308,20 @@ PREORDER_TERMS = [
     "preorder available", "pre-order available"
 ]
 
-OUT_OF_STOCK_TERMS = [
-    "sold out", "out of stock", "unavailable", "notify when available",
-    "currently unavailable", "temporarily out of stock", "not in stock",
-    "no stock available", "stock: 0", "notify me when in stock", "out-of-stock",
-    "soldout", "backorder", "back order", "waitlist", "wait list",
-    "notify me", "email when available",
-    "check back soon", "sold-out-btn", "notify me when", "register interest",
-    "item unavailable", "releases in", "will be in stock on"
+# STRONG OUT = definitive, product IS sold out (always triggers OUT)
+STRONG_OUT_TERMS = [
+    "sold out", "out of stock", "currently unavailable", "temporarily out of stock",
+    "not in stock", "no stock available", "stock: 0", "out-of-stock", "soldout",
+    "item unavailable", "sold-out-btn"
+]
+
+# WEAK OUT = might be in menu/footer, can be overridden by IN signal
+WEAK_OUT_TERMS = [
+    "unavailable", "notify when available", "notify me when in stock",
+    "backorder", "back order", "waitlist", "wait list",
+    "notify me", "email when available", "check back soon",
+    "notify me when", "register interest", "coming soon",
+    "releases in", "will be in stock on"
 ]
 
 IN_STOCK_TERMS = [
@@ -329,7 +335,8 @@ IN_STOCK_TERMS = [
 ]
 
 PREORDER_PATTERN = re.compile('|'.join(re.escape(term) for term in PREORDER_TERMS), re.IGNORECASE)
-OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
+STRONG_OUT_PATTERN = re.compile('|'.join(re.escape(term) for term in STRONG_OUT_TERMS), re.IGNORECASE)
+WEAK_OUT_PATTERN = re.compile('|'.join(re.escape(term) for term in WEAK_OUT_TERMS), re.IGNORECASE)
 IN_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TERMS), re.IGNORECASE)
 
 def classify_stock(text):
@@ -339,21 +346,32 @@ def classify_stock(text):
     text_lower = text_normalized.lower()
 
     preorder_match = PREORDER_PATTERN.search(text_lower)
-    out_match = OUT_OF_STOCK_PATTERN.search(text_lower)
+    strong_out_match = STRONG_OUT_PATTERN.search(text_lower)
+    weak_out_match = WEAK_OUT_PATTERN.search(text_lower)
     in_match = IN_STOCK_PATTERN.search(text_lower)
 
-    # OUT takes highest priority - if sold out, nothing else matters
-    if out_match:
+    # STRONG OUT takes highest priority - definitive sold out signal
+    if strong_out_match:
         return "out"
+    
+    # PREORDER next
     if preorder_match:
         return "preorder"
+    
+    # IN beats WEAK OUT (Add to Cart button overrides "coming soon" in nav menu)
     if in_match:
         match_text = in_match.group()
         match_pos = in_match.end()
         after_match = text_lower[match_pos:match_pos+10] if match_pos < len(text_lower) else ""
         if match_text == "in stock" and ("items" in after_match or "item" in after_match):
-            return "out"
-        return "in"
+            # "X items in stock" false positive - fall through to weak out check
+            pass
+        else:
+            return "in"
+    
+    # WEAK OUT only if no IN signal found
+    if weak_out_match:
+        return "out"
 
     return "out"
 
