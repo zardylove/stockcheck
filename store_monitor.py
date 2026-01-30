@@ -308,71 +308,99 @@ PREORDER_TERMS = [
     "preorder available", "pre-order available"
 ]
 
-# STRONG OUT = definitive, product IS sold out (always triggers OUT)
-STRONG_OUT_TERMS = [
+# OUT terms - definitive sold out signals
+OUT_OF_STOCK_TERMS = [
     "sold out", "out of stock", "currently unavailable", "temporarily out of stock",
     "not in stock", "no stock available", "stock: 0", "out-of-stock", "soldout",
-    "item unavailable", "sold-out-btn"
+    "item unavailable", "sold-out-btn", "notify when available", "notify me when in stock",
+    "backorder", "back order", "waitlist", "wait list", "email when available",
+    "check back soon", "notify me when", "register interest"
 ]
 
-# WEAK OUT = might be in menu/footer, can be overridden by IN signal
-WEAK_OUT_TERMS = [
-    "unavailable", "notify when available", "notify me when in stock",
-    "backorder", "back order", "waitlist", "wait list",
-    "notify me", "email when available", "check back soon",
-    "notify me when", "register interest", "coming soon",
-    "releases in", "will be in stock on"
-]
-
-IN_STOCK_TERMS = [
-    "add to cart", "add to basket", "add to bag", "add to trolley",
-    "add to order", "in stock", "available now", "available to buy",
-    "buy now", "order now", "item in stock", "stock available",
-    "stock: available", "instock", "in-stock", "add to shopping bag",
-    "add to shopping cart", "purchase now", "get it now",
+# Text-based IN terms (fallback if no button found)
+IN_STOCK_TEXT_TERMS = [
+    "in stock", "available now", "available to buy", "item in stock", 
+    "stock available", "stock: available", "instock", "in-stock",
     "ready to ship", "ships today", "in stock now",
     "only a few left", "low stock", "limited stock", "few remaining"
 ]
 
+# Button text patterns for active add-to-cart buttons
+ADD_TO_CART_BUTTON_TERMS = [
+    "add to cart", "add to basket", "add to bag", "add to trolley",
+    "add to order", "buy now", "order now", "add to shopping bag",
+    "add to shopping cart", "purchase now", "get it now"
+]
+
 PREORDER_PATTERN = re.compile('|'.join(re.escape(term) for term in PREORDER_TERMS), re.IGNORECASE)
-STRONG_OUT_PATTERN = re.compile('|'.join(re.escape(term) for term in STRONG_OUT_TERMS), re.IGNORECASE)
-WEAK_OUT_PATTERN = re.compile('|'.join(re.escape(term) for term in WEAK_OUT_TERMS), re.IGNORECASE)
-IN_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TERMS), re.IGNORECASE)
+OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
+IN_STOCK_TEXT_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TEXT_TERMS), re.IGNORECASE)
+ADD_TO_CART_PATTERN = re.compile('|'.join(re.escape(term) for term in ADD_TO_CART_BUTTON_TERMS), re.IGNORECASE)
 
-def classify_stock(text):
-    text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
-    text_normalized = ' '.join(text_normalized.split())
-
-    text_lower = text_normalized.lower()
-
-    preorder_match = PREORDER_PATTERN.search(text_lower)
-    strong_out_match = STRONG_OUT_PATTERN.search(text_lower)
-    weak_out_match = WEAK_OUT_PATTERN.search(text_lower)
-    in_match = IN_STOCK_PATTERN.search(text_lower)
-
-    # STRONG OUT takes highest priority - definitive sold out signal
-    if strong_out_match:
-        return "out"
+def has_active_add_to_cart_button(soup):
+    """Check if page has an actual add-to-cart button that isn't disabled"""
+    # Look for button and input elements
+    buttons = soup.find_all(['button', 'input'])
     
-    # PREORDER next
-    if preorder_match:
+    for btn in buttons:
+        # Get button text
+        btn_text = ""
+        if btn.name == 'input':
+            btn_text = btn.get('value', '')
+        else:
+            btn_text = btn.get_text(strip=True)
+        
+        btn_text_lower = btn_text.lower()
+        
+        # Check if it's an add-to-cart type button
+        if ADD_TO_CART_PATTERN.search(btn_text_lower):
+            # Check if NOT disabled
+            is_disabled = (
+                btn.get('disabled') is not None or
+                'disabled' in btn.get('class', []) or
+                btn.get('aria-disabled') == 'true'
+            )
+            if not is_disabled:
+                return True
+    
+    return False
+
+def classify_stock_with_soup(soup, page_text, raw_html):
+    """Smarter stock detection using HTML structure"""
+    text_lower = page_text.lower()
+    
+    # 1. Check for preorder terms first
+    if PREORDER_PATTERN.search(text_lower):
         return "preorder"
     
-    # IN beats WEAK OUT (Add to Cart button overrides "coming soon" in nav menu)
-    if in_match:
-        match_text = in_match.group()
-        match_pos = in_match.end()
-        after_match = text_lower[match_pos:match_pos+10] if match_pos < len(text_lower) else ""
-        if match_text == "in stock" and ("items" in after_match or "item" in after_match):
-            # "X items in stock" false positive - fall through to weak out check
-            pass
-        else:
-            return "in"
-    
-    # WEAK OUT only if no IN signal found
-    if weak_out_match:
+    # 2. Check for definitive OUT terms in visible text
+    if OUT_OF_STOCK_PATTERN.search(text_lower):
         return "out"
+    
+    # 3. Check for active add-to-cart BUTTON (not just text)
+    if has_active_add_to_cart_button(soup):
+        return "in"
+    
+    # 4. Check for stock indicator text
+    if IN_STOCK_TEXT_PATTERN.search(text_lower):
+        return "in"
+    
+    return "out"
 
+def classify_stock(text):
+    """Legacy text-only classification (fallback)"""
+    text_normalized = text.replace('\xa0', ' ').replace('\u00a0', ' ')
+    text_normalized = ' '.join(text_normalized.split())
+    text_lower = text_normalized.lower()
+
+    if PREORDER_PATTERN.search(text_lower):
+        return "preorder"
+    if OUT_OF_STOCK_PATTERN.search(text_lower):
+        return "out"
+    if IN_STOCK_TEXT_PATTERN.search(text_lower):
+        return "in"
+    if ADD_TO_CART_PATTERN.search(text_lower):
+        return "in"
     return "out"
 
 def is_site_in_failure_cooldown(url):
@@ -645,7 +673,7 @@ def confirm_product_stock(product_url):
         if is_store_unavailable(page_text):
             return "unknown", product_name, image_url, price
 
-        stock_status = classify_stock(page_text + " " + raw_html)
+        stock_status = classify_stock_with_soup(soup, page_text, raw_html)
 
         return stock_status, product_name, image_url, price
 
@@ -705,7 +733,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         if not product_name:
             product_name = urlparse(url).path.split('/')[-1].replace('-', ' ').replace('.html', '')[:100]
 
-        stock_status = classify_stock(page_text + " " + raw_html)
+        stock_status = classify_stock_with_soup(soup, page_text, raw_html)
         is_available = stock_status in ("in", "preorder")
 
         current_state = {
