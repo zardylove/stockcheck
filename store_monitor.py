@@ -667,7 +667,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
             if not is_verification:
                 stats['failed'] += 1
                 HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {r.status_code}"})
-            return previous_state, None
+            return None, None
         
         if not is_verification:
             stats['fetched'] += 1
@@ -720,16 +720,16 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         if not is_verification:
             stats['failed'] += 1
             HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Timeout"})
-        return previous_state, None
+        return None, None
     except Exception as e:
         domain = urlparse(url).netloc
         file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
-        print(f"❌ Error checking direct product {url}: {e}")
+        print(f"❌ Error: {str(e)[:50]}")
         mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
             HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": str(e)[:50]})
-        return previous_state, None
+        return None, None
 
 def main():
     global CURRENT_WEBHOOK, CURRENT_ROLE_ID
