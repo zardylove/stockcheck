@@ -647,7 +647,8 @@ def get_headers_for_url(url):
         "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
         "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
         "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
-        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk"
+        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk",
+        "thetoyplanet.co.uk"
     ]
     if any(site in url.lower() for site in mobile_sites):
         return MOBILE_HEADERS
