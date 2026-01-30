@@ -313,7 +313,7 @@ OUT_OF_STOCK_TERMS = [
     "currently unavailable", "temporarily out of stock", "not in stock",
     "no stock available", "stock: 0", "notify me when in stock", "out-of-stock",
     "soldout", "backorder", "back order", "waitlist", "wait list",
-    "notify me", "email when available", "outofstock", "schema.org/outofstock",
+    "notify me", "email when available",
     "check back soon", "sold-out-btn", "notify me when", "register interest",
     "item unavailable", "coming soon", "releases in", "will be in stock on"
 ]
@@ -342,26 +342,18 @@ def classify_stock(text):
     out_match = OUT_OF_STOCK_PATTERN.search(text_lower)
     in_match = IN_STOCK_PATTERN.search(text_lower)
 
-    # PREORDER takes highest priority
+    # OUT takes highest priority - if sold out, nothing else matters
+    if out_match:
+        return "out"
     if preorder_match:
         return "preorder"
-    
-    # IN_STOCK takes priority over OUT when both present
-    # An active "Add to Cart" button means the product is in stock
-    # regardless of other products on the page showing "out of stock"
     if in_match:
         match_text = in_match.group()
         match_pos = in_match.end()
         after_match = text_lower[match_pos:match_pos+10] if match_pos < len(text_lower) else ""
-        # Check for false positive "X items in stock" patterns
         if match_text == "in stock" and ("items" in after_match or "item" in after_match):
-            pass  # Continue to check OUT terms
-        else:
-            return "in"
-    
-    # OUT only if no IN match found
-    if out_match:
-        return "out"
+            return "out"
+        return "in"
 
     return "out"
 
