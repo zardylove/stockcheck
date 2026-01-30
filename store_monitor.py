@@ -315,7 +315,7 @@ OUT_OF_STOCK_TERMS = [
     "soldout", "backorder", "back order", "waitlist", "wait list",
     "notify me", "email when available",
     "check back soon", "sold-out-btn", "notify me when", "register interest",
-    "item unavailable", "coming soon", "releases in", "will be in stock on"
+    "item unavailable", "releases in", "will be in stock on"
 ]
 
 IN_STOCK_TERMS = [
