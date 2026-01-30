@@ -944,7 +944,7 @@ def main():
                     f"• **Bot status**: ✅ Active"
                 )
                 try:
-                    requests.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
+                    SESSION.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
                     print("📤 Sent hourly status ping")
                     LAST_HOURLY_PING = current_hour
                     save_ping_state("hourly", current_hour)
@@ -985,7 +985,7 @@ def main():
                     f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
                 )
                 try:
-                    requests.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
+                    SESSION.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
                     print("📤 Sent daily status ping (8 AM UK time)")
                     LAST_DAILY_PING = current_day
                     save_ping_state("daily", current_day)
