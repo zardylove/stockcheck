@@ -88,6 +88,7 @@ DAILY_STATS = {}   # {file_name: {'fetched': 0, 'failed': 0, 'alerts': 0}} - acc
 TOTAL_SCANS = 0    # Total scan cycles completed (resets hourly)
 DAILY_SCANS = 0    # Total scan cycles completed (resets daily)
 HOURLY_FAILED_DETAILS = []  # List of {url, product, reason} - tracks all failures this hour
+USE_MOBILE_HEADERS = False  # Toggles each cycle: False=desktop, True=mobile
 
 # === OPTIMIZATION: JS/Dynamic page skip cache ===
 JS_SKIP_CACHE = {}  # {url: skip_until_time}
@@ -635,22 +636,8 @@ def confirm_product_stock(product_url):
         return "unknown", None, None, None
 
 def get_headers_for_url(url):
-    mobile_sites = [
-        "very.co.uk", "freemans.com", "jdwilliams.co.uk", "jacamo.co.uk",
-        "gameon.games", "hillscards.co.uk", "hmv.com", "game.co.uk",
-        "johnlewis.com", "hamleys.com",
-        "zingaentertainment.com", "themeeplerooms.co.uk", "jetcards.uk",
-        "rockawaytoys.co.uk", "moon-whale.com", "redcardgames.com",
-        "afkgaming.co.uk", "ajtoys.co.uk", "bremnertcg.co.uk",
-        "coastiescollectibles.com", "dansolotcg.co.uk", "thedicedungeon.co.uk",
-        "dragonvault.gg", "eclipsecards.com", "endocollects.co.uk",
-        "gatheringgames.co.uk", "hammerheadtcg.co.uk", "nerdforged.co.uk",
-        "peakycollectibles.co.uk", "safarizone.co.uk", "sweetsnthings.co.uk",
-        "thistletavern.com", "thirstymeeples.co.uk", "titancards.co.uk",
-        "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk",
-        "thetoyplanet.co.uk"
-    ]
-    if any(site in url.lower() for site in mobile_sites):
+    # Rotate between desktop and mobile headers each cycle
+    if USE_MOBILE_HEADERS:
         return MOBILE_HEADERS
     return HEADERS
 
@@ -772,6 +759,10 @@ def main():
         print(f"   {franchise['name']}: {len(direct_files)} direct files, {webhook_groups} webhook groups")
 
     while True:
+        global USE_MOBILE_HEADERS
+        USE_MOBILE_HEADERS = not USE_MOBILE_HEADERS
+        header_type = "📱 Mobile" if USE_MOBILE_HEADERS else "🖥️ Desktop"
+        
         cycle_start = time.time()
         total_cycle_changes = 0
         total_stats = {'fetched': 0, 'failed': 0}
@@ -906,7 +897,7 @@ def main():
             else:
                 print(f"📊 Cycle complete. No changes detected.")
 
-        print(f"📈 Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | Cycle: {cycle_time}s")
+        print(f"📈 Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | {header_type} | Cycle: {cycle_time}s")
 
         # === HOURLY STATUS PING (exactly on the hour in London/UK time) ===
         global LAST_HOURLY_PING, LAST_DAILY_PING
