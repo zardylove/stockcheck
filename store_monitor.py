@@ -46,7 +46,8 @@ FRANCHISES = [
             "One Piece/IB-V5.txt",
             "One Piece/IB-V6.txt",
             "One Piece/OP-13.txt",
-            "One Piece/OP-14.txt"
+            "One Piece/OP-14.txt",
+            "One Piece/OP-Tins.txt"
         ],
         "webhook_secrets": [
             {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02")},
@@ -55,6 +56,7 @@ FRANCHISES = [
             {"file": "One Piece/IB-V6.txt", "webhook": os.getenv("IBV6")},
             {"file": "One Piece/OP-13.txt", "webhook": os.getenv("OP13")},
             {"file": "One Piece/OP-14.txt", "webhook": os.getenv("OP14")},
+            {"file": "One Piece/OP-Tins.txt", "webhook": os.getenv("OPTINS")},
         ]
     }
 ]
