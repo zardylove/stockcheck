@@ -901,7 +901,11 @@ def main():
                             else:
                                 print(f"❌ Verification failed (no response)")
                         else:
-                            print(f"{detailed_status}")
+                            # Show more informative status for items already in stock
+                            if detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
+                                print(f"{detailed_status} - ping already sent")
+                            else:
+                                print(f"{detailed_status}")
 
                         prev_in_stock = prev_state.get("in_stock") if prev_state else None
                         if current_state["in_stock"] != prev_in_stock:
