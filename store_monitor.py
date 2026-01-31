@@ -384,29 +384,65 @@ def has_active_add_to_cart_button(soup):
     
     return False
 
+def find_main_product_area(soup):
+    """Find the main product section (not related products)"""
+    # Check for Wix data-hook attribute first
+    wix_product = soup.find(attrs={'data-hook': 'product-page'})
+    if wix_product:
+        return wix_product
+    
+    # Common classes for main product area
+    main_selectors = [
+        'product-essential', 'product-main', 'product-info-main',
+        'product-details-wrapper', 'product-single', 'pdp-main',
+        'product-form', 'product-info', 'product-summary'
+    ]
+    for selector in main_selectors:
+        area = soup.find(class_=re.compile(rf'\b{selector}\b', re.I))
+        if area:
+            return area
+    return None
+
 def classify_stock_with_soup(soup, page_text, raw_html):
     """Smarter stock detection using HTML structure"""
     text_lower = page_text.lower()
     
-    # 1. Check for active add-to-cart BUTTON first - most reliable indicator
-    #    (pages with multiple products may have "out of stock" text for OTHER items)
+    # 1. Try to find main product area first - if found, use it exclusively
+    main_area = find_main_product_area(soup)
+    
+    if main_area:
+        main_text = main_area.get_text().lower()
+        # Check main area for OUT terms first
+        if OUT_OF_STOCK_PATTERN.search(main_text):
+            return "out"
+        # Check main area for active Add to Cart button
+        if has_active_add_to_cart_button(main_area):
+            if PREORDER_PATTERN.search(main_text):
+                return "preorder"
+            return "in"
+        # Check main area for preorder
+        if PREORDER_PATTERN.search(main_text):
+            return "preorder"
+        # Main area found but no clear indicators - default out
+        return "out"
+    
+    # 2. No main area found - use original logic (OUT terms first)
+    if OUT_OF_STOCK_PATTERN.search(text_lower):
+        return "out"
+    
+    # 3. Check for active add-to-cart BUTTON
     if has_active_add_to_cart_button(soup):
-        # Check if it's a preorder button
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
     
-    # 2. Check for definitive OUT terms
-    if OUT_OF_STOCK_PATTERN.search(text_lower):
-        return "out"
-    
-    # 3. Check for stock indicator text
+    # 4. Check for stock indicator text
     if IN_STOCK_TEXT_PATTERN.search(text_lower):
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
     
-    # 4. Check for preorder terms alone (no out, no in button)
+    # 5. Check for preorder terms alone
     if PREORDER_PATTERN.search(text_lower):
         return "preorder"
     
