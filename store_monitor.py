@@ -797,11 +797,50 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         stock_status = classify_stock_with_soup(soup, page_text, raw_html)
         is_available = stock_status in ("in", "preorder")
 
+        # Extract image URL
+        image_url = None
+        img_selectors = [
+            'img.product-featured-image', 'img.product-image', 'img.product__image',
+            'meta[property="og:image"]', 'meta[name="og:image"]'
+        ]
+        for selector in img_selectors:
+            elem = soup.select_one(selector)
+            if elem:
+                if elem.name == 'meta':
+                    image_url = elem.get('content')
+                else:
+                    image_url = elem.get('src') or elem.get('data-src')
+                if image_url:
+                    if image_url.startswith('//'):
+                        image_url = 'https:' + image_url
+                    elif image_url.startswith('/'):
+                        parsed = urlparse(url)
+                        image_url = f"{parsed.scheme}://{parsed.netloc}{image_url}"
+                    break
+
+        # Extract price
+        price = None
+        price_selectors = ['.price', '.product-price', 'meta[property="product:price:amount"]', '[data-hook="formatted-primary-price"]']
+        for selector in price_selectors:
+            elem = soup.select_one(selector)
+            if elem:
+                if elem.name == 'meta':
+                    price = f"£{elem.get('content')}"
+                else:
+                    price_text = elem.get_text(strip=True)
+                    match = re.search(r'[£$€][\d,]+\.?\d*', price_text)
+                    if match:
+                        price = match.group()
+                if price:
+                    break
+
         current_state = {
             "name": product_name,
             "in_stock": is_available,
             "stock_status": stock_status,
-            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None,
+            "image_url": image_url,
+            "price": price
         }
 
         change = None
@@ -814,7 +853,9 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                         "type": "preorder" if stock_status == "preorder" else "restock",
                         "name": product_name,
                         "url": url,
-                        "store_file": store_file
+                        "store_file": store_file,
+                        "image_url": image_url,
+                        "price": price
                     }
 
         return current_state, change
@@ -945,8 +986,12 @@ def main():
                                         file_stats['alerts'] += 1
                                         is_preorder = verified_status == "preorder"
                                         print(f"✅ {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
+                                        # Get image and price from verified state or original change
+                                        img = verified_state.get("image_url") or change.get("image_url")
+                                        prc = verified_state.get("price") or change.get("price")
                                         send_alert(change['name'], change["url"], store_name,
                                                   is_preorder=is_preorder, is_new=False,
+                                                  image_url=img, price=prc,
                                                   store_file=file_path)
                                         direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
                                         save_product(url, current_state["name"], True)
