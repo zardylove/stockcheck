@@ -369,16 +369,17 @@ def classify_stock_with_soup(soup, page_text, raw_html):
     """Smarter stock detection using HTML structure"""
     text_lower = page_text.lower()
     
-    # 1. Check for definitive OUT terms first - "sold out" means sold out
-    if OUT_OF_STOCK_PATTERN.search(text_lower):
-        return "out"
-    
-    # 2. Check for active add-to-cart BUTTON (not just text)
+    # 1. Check for active add-to-cart BUTTON first - most reliable indicator
+    #    (pages with multiple products may have "out of stock" text for OTHER items)
     if has_active_add_to_cart_button(soup):
         # Check if it's a preorder button
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
+    
+    # 2. Check for definitive OUT terms
+    if OUT_OF_STOCK_PATTERN.search(text_lower):
+        return "out"
     
     # 3. Check for stock indicator text
     if IN_STOCK_TEXT_PATTERN.search(text_lower):
