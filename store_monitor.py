@@ -21,7 +21,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 FRANCHISES = [
     {
         "name": "Pokemon",
-        "role_id": os.getenv("POKEMON_ROLE"),
+        "role_id": os.getenv("POKE_ROLE"),
         "direct_files": [
             "Pokemon/Poke-30A.txt",
             "Pokemon/Poke-AH.txt",
@@ -39,7 +39,7 @@ FRANCHISES = [
     },
     {
         "name": "One Piece",
-        "role_id": os.getenv("ONEPIECE_ROLE"),
+        "role_id": os.getenv("OP_ROLE"),
         "direct_files": [
             "One Piece/EB-02.txt",
             "One Piece/EB-03.txt",
