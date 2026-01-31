@@ -337,8 +337,24 @@ OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_ST
 IN_STOCK_TEXT_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TEXT_TERMS), re.IGNORECASE)
 ADD_TO_CART_PATTERN = re.compile('|'.join(re.escape(term) for term in ADD_TO_CART_BUTTON_TERMS), re.IGNORECASE)
 
+def is_element_hidden(element):
+    """Check if element or any parent is hidden via style or class"""
+    current = element
+    while current and hasattr(current, 'get'):
+        # Check inline style for display:none
+        style = current.get('style', '')
+        if style and ('display:none' in style.replace(' ', '') or 'display: none' in style):
+            return True
+        # Check for hidden classes
+        classes = current.get('class', [])
+        class_str = ' '.join(classes).lower() if classes else ''
+        if 'hidden' in class_str or 'hide' in class_str or 'd-none' in class_str:
+            return True
+        current = current.parent
+    return False
+
 def has_active_add_to_cart_button(soup):
-    """Check if page has an actual add-to-cart button that isn't disabled"""
+    """Check if page has an actual add-to-cart button that isn't disabled or hidden"""
     # Look for button and input elements
     buttons = soup.find_all(['button', 'input'])
     
@@ -360,7 +376,10 @@ def has_active_add_to_cart_button(soup):
                 'disabled' in btn.get('class', []) or
                 btn.get('aria-disabled') == 'true'
             )
-            if not is_disabled:
+            # Check if NOT hidden
+            is_hidden = is_element_hidden(btn)
+            
+            if not is_disabled and not is_hidden:
                 return True
     
     return False
