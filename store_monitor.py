@@ -659,7 +659,7 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
         embed["thumbnail"] = {"url": image_url}
 
     data = {
-        "content": f"{emoji} **RESTOCK** - {product_name} @{store_name} {role_mention}",
+        "content": f"{emoji} **RESTOCK** - **{product_name}** @{store_name} {role_mention}",
         "embeds": [embed],
         "allowed_mentions": {"parse": ["roles"]}
     }
