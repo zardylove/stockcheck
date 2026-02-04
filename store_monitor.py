@@ -27,7 +27,8 @@ FRANCHISES = [
             "Pokemon/Poke-AH.txt",
             "Pokemon/Poke-DR.txt",
             "Pokemon/Poke-ME.txt",
-            "Pokemon/Poke-PO.txt"
+            "Pokemon/Poke-PO.txt",
+            "Pokemon/Other.txt"
         ],
         "webhook_secrets": [
             {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A")},
@@ -35,7 +36,9 @@ FRANCHISES = [
             {"file": "Pokemon/Poke-DR.txt", "webhook": os.getenv("POKEDR")},
             {"file": "Pokemon/Poke-ME.txt", "webhook": os.getenv("POKEME")},
             {"file": "Pokemon/Poke-PO.txt", "webhook": os.getenv("POKEPO")},
-        ]
+            {"file": "Pokemon/Other.txt", "webhook": os.getenv("POKEOTHER")},
+        ],
+        "dormant_files": ["Pokemon/Other.txt"]
     },
     {
         "name": "One Piece",
@@ -673,7 +676,7 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     except Exception as e:
         print(f"❌ Discord error: {e}")
 
-def confirm_product_stock(product_url):
+def confirm_product_stock(product_url, check_redirect=False):
     try:
         headers = get_headers_for_url(product_url)
         timeout = get_timeout_for_url(product_url)
@@ -681,6 +684,12 @@ def confirm_product_stock(product_url):
 
         if r.status_code != 200:
             return "unknown", None, None, None
+        
+        if check_redirect:
+            original_path = urlparse(product_url).path.rstrip('/')
+            final_path = urlparse(r.url).path.rstrip('/')
+            if final_path == '' or final_path == '/' or (original_path != final_path and len(final_path) < 10):
+                return "redirected", None, None, None
 
         soup = BeautifulSoup(r.text, "html.parser")
         page_text = soup.get_text()
@@ -754,7 +763,7 @@ def get_timeout_for_url(url):
         return 30
     return 15
 
-def check_direct_product(url, previous_state, stats, store_file=None, is_verification=False):
+def check_direct_product(url, previous_state, stats, store_file=None, is_verification=False, is_dormant=False):
     if is_site_in_failure_cooldown(url):
         print(f"⏭️ SKIPPED (failed recently)")
         if not is_verification:
@@ -769,12 +778,22 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         if r.status_code != 200:
             domain = urlparse(url).netloc
             file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
+            if is_dormant:
+                print(f"OUT - page removed ({r.status_code})")
+                return {"name": None, "in_stock": False, "stock_status": "out", "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
             print(f"⚠️ Failed ({r.status_code})")
             mark_site_failed(url)
             if not is_verification:
                 stats['failed'] += 1
                 HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {r.status_code}"})
             return None, None
+        
+        if is_dormant:
+            original_path = urlparse(url).path.rstrip('/')
+            final_path = urlparse(r.url).path.rstrip('/')
+            if final_path == '' or final_path == '/' or (original_path != final_path and len(final_path) < 10):
+                print(f"OUT - redirected")
+                return {"name": None, "in_stock": False, "stock_status": "out", "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
         
         if not is_verification:
             stats['fetched'] += 1
@@ -936,34 +955,38 @@ def main():
             franchise_changes = 0
 
             # Scan each file separately for clearer logging
+            dormant_files = franchise.get("dormant_files", [])
             for file_path in direct_files:
                 file_name = file_path.split('/')[-1].replace('.txt', '')
                 file_urls = load_urls([file_path])
+                is_dormant = file_path in dormant_files
                 
                 if not file_urls:
                     continue
                 
-                # Initialize per-file stats tracking
+                # Initialize per-file stats tracking (skip for dormant files)
                 global HOURLY_STATS, DAILY_STATS
-                if file_name not in HOURLY_STATS:
-                    HOURLY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
-                else:
-                    HOURLY_STATS[file_name]['products'] = len(file_urls)
-                if file_name not in DAILY_STATS:
-                    DAILY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
-                else:
-                    DAILY_STATS[file_name]['products'] = len(file_urls)
+                if not is_dormant:
+                    if file_name not in HOURLY_STATS:
+                        HOURLY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
+                    else:
+                        HOURLY_STATS[file_name]['products'] = len(file_urls)
+                    if file_name not in DAILY_STATS:
+                        DAILY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
+                    else:
+                        DAILY_STATS[file_name]['products'] = len(file_urls)
                 
                 file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0, 'skipped': 0}
                 
-                print(f"\n📁 {file_name} ({len(file_urls)} products)")
+                dormant_label = " [DORMANT]" if is_dormant else ""
+                print(f"\n📁 {file_name}{dormant_label} ({len(file_urls)} products)")
                 
                 for url in file_urls:
                     store_name = urlparse(url).netloc
                     print(f"  Checking: {store_name}...", end=" ")
 
                     prev_state = direct_state.get(url)
-                    current_state, change = check_direct_product(url, prev_state, file_stats, store_file=file_path)
+                    current_state, change = check_direct_product(url, prev_state, file_stats, store_file=file_path, is_dormant=is_dormant)
 
                     if current_state:
                         direct_state[url] = current_state
@@ -972,7 +995,7 @@ def main():
                         if change and not first_run:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
                             time.sleep(5)
-                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path, is_verification=True)
+                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path, is_verification=True, is_dormant=is_dormant)
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
 
@@ -1014,13 +1037,14 @@ def main():
 
                     time.sleep(1)
 
-                # Accumulate file stats into HOURLY_STATS and DAILY_STATS
-                HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
-                HOURLY_STATS[file_name]['failed'] += file_stats['failed']
-                HOURLY_STATS[file_name]['alerts'] += file_stats['alerts']
-                DAILY_STATS[file_name]['fetched'] += file_stats['fetched']
-                DAILY_STATS[file_name]['failed'] += file_stats['failed']
-                DAILY_STATS[file_name]['alerts'] += file_stats['alerts']
+                # Accumulate file stats into HOURLY_STATS and DAILY_STATS (skip dormant files)
+                if not is_dormant:
+                    HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
+                    HOURLY_STATS[file_name]['failed'] += file_stats['failed']
+                    HOURLY_STATS[file_name]['alerts'] += file_stats['alerts']
+                    DAILY_STATS[file_name]['fetched'] += file_stats['fetched']
+                    DAILY_STATS[file_name]['failed'] += file_stats['failed']
+                    DAILY_STATS[file_name]['alerts'] += file_stats['alerts']
                 
                 # Also accumulate into franchise stats
                 stats['fetched'] += file_stats['fetched']
