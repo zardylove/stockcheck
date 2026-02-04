@@ -882,6 +882,9 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
     except requests.exceptions.Timeout:
         domain = urlparse(url).netloc
         file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
+        if is_dormant:
+            print(f"OUT - timeout")
+            return {"name": None, "in_stock": False, "stock_status": "out", "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
         print(f"⏱️ TIMEOUT")
         mark_site_failed(url)
         if not is_verification:
