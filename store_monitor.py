@@ -1026,7 +1026,10 @@ def main():
                                 print(f"❌ Verification failed (no response)")
                         else:
                             # Show more informative status for items already in stock
-                            if detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
+                            # Skip printing for dormant files that already printed their status
+                            if is_dormant and detailed_status == "OUT":
+                                pass  # Already printed by check_direct_product
+                            elif detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
                                 print(f"{detailed_status} - ping already sent")
                             else:
                                 print(f"{detailed_status}")
