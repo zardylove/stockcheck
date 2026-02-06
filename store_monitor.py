@@ -28,7 +28,7 @@ FRANCHISES = [
             "Pokemon/Poke-DR.txt",
             "Pokemon/Poke-ME.txt",
             "Pokemon/Poke-PO.txt",
-            "Pokemon/Other.txt"
+            "Pokemon/Poke-Other.txt"
         ],
         "webhook_secrets": [
             {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A")},
@@ -36,9 +36,9 @@ FRANCHISES = [
             {"file": "Pokemon/Poke-DR.txt", "webhook": os.getenv("POKEDR")},
             {"file": "Pokemon/Poke-ME.txt", "webhook": os.getenv("POKEME")},
             {"file": "Pokemon/Poke-PO.txt", "webhook": os.getenv("POKEPO")},
-            {"file": "Pokemon/Other.txt", "webhook": os.getenv("POKEOTHER")},
+            {"file": "Pokemon/Poke-Other.txt", "webhook": os.getenv("POKEOTHER")},
         ],
-        "dormant_files": ["Pokemon/Other.txt"]
+        "dormant_files": ["Pokemon/Poke-Other.txt"]
     },
     {
         "name": "One Piece",
@@ -50,7 +50,7 @@ FRANCHISES = [
             "One Piece/IB-V6.txt",
             "One Piece/OP-13.txt",
             "One Piece/OP-14.txt",
-            "One Piece/OP-Tins.txt"
+            "One Piece/OP-Other.txt"
         ],
         "webhook_secrets": [
             {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02")},
@@ -59,7 +59,7 @@ FRANCHISES = [
             {"file": "One Piece/IB-V6.txt", "webhook": os.getenv("IBV6")},
             {"file": "One Piece/OP-13.txt", "webhook": os.getenv("OP13")},
             {"file": "One Piece/OP-14.txt", "webhook": os.getenv("OP14")},
-            {"file": "One Piece/OP-Tins.txt", "webhook": os.getenv("OPTINS")},
+            {"file": "One Piece/OP-Other.txt", "webhook": os.getenv("OPOTHER")},
         ]
     }
 ]
