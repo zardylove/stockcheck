@@ -15,9 +15,16 @@ The primary bot (`store_monitor.py`) supports **multiple franchises** with separ
 - Detects **restocks** (products changing from out-of-stock to in-stock)
 - Sends Discord alerts to **franchise-specific webhooks**
 - Stores product state in **PostgreSQL database** (persists across republishes)
+- **Database-backed URL management**: URLs stored in `monitored_urls` table for live updates without republishing
 - Runs continuously with no delay between scan cycles
 - **TCG-only filtering**: Filters out plushies, toys, figures, and non-card products
 - Discord alerts work in both development and production modes
+
+### URL Management
+- In **dev mode**: Text file changes are automatically synced to the database each scan cycle
+- In **production**: Run `python sync_urls.py` in the Replit shell to push file changes to the database without republishing
+- New URLs added to files will trigger alerts immediately if the product is in stock
+- Removed URLs are cleaned up from monitoring automatically
 
 ### Performance Optimizations (Dec 2024)
 - **Session reuse**: Single `requests.Session()` for connection pooling

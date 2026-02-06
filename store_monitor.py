@@ -218,6 +218,14 @@ def init_database():
                 last_ping TEXT
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS monitored_urls (
+                url TEXT NOT NULL,
+                file_group TEXT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (url, file_group)
+            )
+        """)
         conn.commit()
         cur.close()
         return_db_connection(conn)
@@ -520,6 +528,70 @@ def load_urls(file_list):
         except FileNotFoundError:
             print(f"⚠️ File not found: {file_path}")
     return list(all_urls)
+
+def sync_urls_to_db():
+    if not DATABASE_URL:
+        return
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        total_added = 0
+        total_removed = 0
+        for franchise in FRANCHISES:
+            for file_path in franchise.get("direct_files", []):
+                file_urls = set()
+                try:
+                    with open(file_path, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and line.startswith("http"):
+                                file_urls.add(line.split()[0])
+                except FileNotFoundError:
+                    continue
+                cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
+                db_urls = set(row[0] for row in cur.fetchall())
+                new_urls = file_urls - db_urls
+                removed_urls = db_urls - file_urls
+                for url in new_urls:
+                    cur.execute("INSERT INTO monitored_urls (url, file_group) VALUES (%s, %s) ON CONFLICT DO NOTHING", (url, file_path))
+                    total_added += 1
+                for url in removed_urls:
+                    cur.execute("DELETE FROM monitored_urls WHERE url = %s AND file_group = %s", (url, file_path))
+                    total_removed += 1
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+        if total_added > 0 or total_removed > 0:
+            print(f"🔄 URL sync: {total_added} added, {total_removed} removed")
+        else:
+            print(f"🔄 URL sync: all up to date")
+    except Exception as e:
+        print(f"⚠️ URL sync error: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+            return_db_connection(conn)
+
+def load_urls_from_db(file_path):
+    if not DATABASE_URL:
+        return load_urls([file_path])
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
+        urls = [row[0] for row in cur.fetchall()]
+        cur.close()
+        return_db_connection(conn)
+        return urls
+    except Exception as e:
+        print(f"⚠️ DB URL load error, falling back to file: {e}")
+        if conn:
+            return_db_connection(conn)
+        return load_urls([file_path])
 
 def load_direct_state():
     direct_state = {}
@@ -876,6 +948,15 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                         "image_url": image_url,
                         "price": price
                     }
+        elif not previous_state and is_available:
+            change = {
+                "type": "preorder" if stock_status == "preorder" else "new",
+                "name": product_name,
+                "url": url,
+                "store_file": store_file,
+                "image_url": image_url,
+                "price": price
+            }
 
         return current_state, change
 
@@ -915,6 +996,8 @@ def main():
     if not init_database():
         print("❌ Database init failed. Exiting.")
         return
+
+    sync_urls_to_db()
     load_ping_state()
 
     direct_state = load_direct_state()
@@ -932,6 +1015,9 @@ def main():
         global USE_MOBILE_HEADERS
         USE_MOBILE_HEADERS = not USE_MOBILE_HEADERS
         header_type = "📱 Mobile" if USE_MOBILE_HEADERS else "🖥️ Desktop"
+
+        if not IS_PRODUCTION:
+            sync_urls_to_db()
         
         cycle_start = time.time()
         total_cycle_changes = 0
@@ -961,7 +1047,7 @@ def main():
             dormant_files = franchise.get("dormant_files", [])
             for file_path in direct_files:
                 file_name = file_path.split('/')[-1].replace('.txt', '')
-                file_urls = load_urls([file_path])
+                file_urls = load_urls_from_db(file_path)
                 is_dormant = file_path in dormant_files
                 
                 if not file_urls:
