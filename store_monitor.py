@@ -1195,6 +1195,12 @@ def main():
                     total_hourly_fetched += stats['fetched']
                     total_hourly_failed += stats['failed']
                 
+                failed_sites_text = ""
+                if HOURLY_FAILED_DETAILS:
+                    failed_sites_text = f"\n**Failed Requests ({len(HOURLY_FAILED_DETAILS)} total)**\n"
+                    for fail in HOURLY_FAILED_DETAILS:
+                        failed_sites_text += f"  • {fail['url']} | {fail['file']} | {fail['reason']}\n"
+
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
                     f"**Period covered: {time_range}**\n\n"
@@ -1205,6 +1211,7 @@ def main():
                     f"• **Total failed**: {total_hourly_failed}\n"
                     f"• **Alerts sent**: {total_hourly_alerts}\n\n"
                     f"**Per-File Breakdown**\n{file_breakdown}"
+                    f"{failed_sites_text}\n"
                     f"• **Bot status**: ✅ Active"
                 )
                 if len(hourly_summary) > 1950:
