@@ -1195,13 +1195,6 @@ def main():
                     total_hourly_fetched += stats['fetched']
                     total_hourly_failed += stats['failed']
                 
-                # Build failed sites breakdown
-                failed_sites_text = ""
-                if HOURLY_FAILED_DETAILS:
-                    failed_sites_text = f"\n**Failed Requests ({len(HOURLY_FAILED_DETAILS)} total)**\n"
-                    for fail in HOURLY_FAILED_DETAILS:
-                        failed_sites_text += f"  • {fail['url']} | {fail['file']} | {fail['reason']}\n"
-                
                 hourly_summary = (
                     f"🟢 **Hourly Bot Status** ({now_london.strftime('%d %B %Y %H:00 UK time')})\n"
                     f"**Period covered: {time_range}**\n\n"
@@ -1212,15 +1205,18 @@ def main():
                     f"• **Total failed**: {total_hourly_failed}\n"
                     f"• **Alerts sent**: {total_hourly_alerts}\n\n"
                     f"**Per-File Breakdown**\n{file_breakdown}"
-                    f"{failed_sites_text}\n"
                     f"• **Bot status**: ✅ Active"
                 )
+                if len(hourly_summary) > 1950:
+                    hourly_summary = hourly_summary[:1950] + "\n..."
                 try:
-                    SESSION.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
-                    print("📤 Sent hourly status ping")
+                    resp = SESSION.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
+                    if resp.status_code == 204:
+                        print("📤 Sent hourly status ping")
+                    else:
+                        print(f"⚠️ Hourly ping returned HTTP {resp.status_code}: {resp.text[:100]}")
                     LAST_HOURLY_PING = current_hour
                     save_ping_state("hourly", current_hour)
-                    # Reset hourly stats after sending
                     HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
                     HOURLY_FAILED_DETAILS.clear()
                     TOTAL_SCANS = 0
@@ -1256,12 +1252,16 @@ def main():
                     f"• **Bot status**: ✅ Active\n"
                     f"• **Last full cycle**: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
                 )
+                if len(daily_summary) > 1950:
+                    daily_summary = daily_summary[:1950] + "\n..."
                 try:
-                    SESSION.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
-                    print("📤 Sent daily status ping (8 AM UK time)")
+                    resp = SESSION.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
+                    if resp.status_code == 204:
+                        print("📤 Sent daily status ping (8 AM UK time)")
+                    else:
+                        print(f"⚠️ Daily ping returned HTTP {resp.status_code}: {resp.text[:100]}")
                     LAST_DAILY_PING = current_day
                     save_ping_state("daily", current_day)
-                    # Reset daily stats after sending
                     DAILY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in DAILY_STATS.items()}
                     DAILY_SCANS = 0
                 except Exception as e:
