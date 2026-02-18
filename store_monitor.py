@@ -84,9 +84,29 @@ def playwright_proxy_for_url(url: str):
 # === PLAYWRIGHT DOMAINS (JS-heavy / bot-protected) ===
 # Put domains here that need a real browser (Very / John Lewis / Argos etc).
 PLAYWRIGHT_DOMAINS = {
-    "very.co.uk",
-    "johnlewis.com",
+    # JS-heavy / bot protected
     "argos.co.uk",
+    "freemans.com",
+    "currys.co.uk",
+    "forbiddenplanet.com",
+    "game.co.uk",
+    "houseoffraser.co.uk",
+    "hamleys.com",
+    "hillscards.co.uk",
+    "hmv.com",
+    "jdwilliams.co.uk",
+    "johnlewis.com",
+    "sportsdirect.com",
+    "very.co.uk",
+    "waylandgames.co.uk",
+
+    # retailers you listed as “Replit 404 / likely antibot”
+    "alchemistsworkshops.com",
+    "chaoscards.co.uk",
+    "board-game.co.uk",
+    "newrealitiesgaming.com",
+    "firestormgames.co.uk",
+    "tritex-games.co.uk",
 }
 
 def should_use_playwright(url: str) -> bool:
