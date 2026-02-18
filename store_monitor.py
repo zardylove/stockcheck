@@ -11,6 +11,89 @@ from urllib.parse import urljoin, urlparse, urlunparse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+# === PLAYWRIGHT (optional but supported) ===
+PLAYWRIGHT_AVAILABLE = False
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except Exception:
+    # Playwright not installed in this environment; we'll fall back to requests.
+    PLAYWRIGHT_AVAILABLE = False
+
+
+# === DECODO PROXY SUPPORT (requests + optional Playwright proxy) ===
+# Put domains here ONLY if they need proxying (418/403/429 etc).
+DECODO_BLOCKED_DOMAINS = {
+    "thetoyplanet.co.uk",
+    # Add more as you find them blocked, e.g.:
+    # "very.co.uk",
+}
+
+def _host_for_url(url: str) -> str:
+    try:
+        host = url.split("/")[2].lower()
+    except Exception:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+def proxies_for_url(url: str):
+    """
+    Requests proxies dict for domains in DECODO_BLOCKED_DOMAINS.
+    Returns None if domain is not in list or creds missing.
+    """
+    host = _host_for_url(url)
+    if not host or host not in DECODO_BLOCKED_DOMAINS:
+        return None
+
+    user = os.getenv("DECODO_USER")
+    pw = os.getenv("DECODO_PASS")
+    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
+    proxy_port = os.getenv("DECODO_PORT", "10000")
+
+    if not user or not pw:
+        return None
+
+    proxy = f"http://{user}:{pw}@{proxy_host}:{proxy_port}"
+    return {"http": proxy, "https": proxy}
+
+def playwright_proxy_for_url(url: str):
+    """
+    Playwright proxy settings for domains in DECODO_BLOCKED_DOMAINS.
+    Playwright expects server/username/password, not a URL with creds.
+    """
+    host = _host_for_url(url)
+    if not host or host not in DECODO_BLOCKED_DOMAINS:
+        return None
+
+    user = os.getenv("DECODO_USER")
+    pw = os.getenv("DECODO_PASS")
+    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
+    proxy_port = os.getenv("DECODO_PORT", "10000")
+    if not user or not pw:
+        return None
+
+    return {
+        "server": f"http://{proxy_host}:{proxy_port}",
+        "username": user,
+        "password": pw,
+    }
+
+
+# === PLAYWRIGHT DOMAINS (JS-heavy / bot-protected) ===
+# Put domains here that need a real browser (Very / John Lewis / Argos etc).
+PLAYWRIGHT_DOMAINS = {
+    "very.co.uk",
+    "johnlewis.com",
+    "argos.co.uk",
+}
+
+def should_use_playwright(url: str) -> bool:
+    host = _host_for_url(url)
+    return host in PLAYWRIGHT_DOMAINS
+
+
 # === DATABASE CONNECTION POOL ===
 DB_POOL = None
 MAX_TIMEOUT = 60
@@ -104,7 +187,7 @@ VERIFIED_OUT_CACHE = set()
 JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
 
 # HTML content that indicates JS-only rendering
-JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder', 
+JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder',
                       'please enable javascript', 'browser does not support']
 
 # === PRODUCT TYPE FILTERING (block non-TCG items) ===
@@ -165,6 +248,66 @@ SHOPIFY_STORES_WITH_ANTIBOT = [
     "toybarnhaus.co.uk", "travellingman.com", "westendgames.co.uk",
 ]
 
+
+# === REQUEST/PLAYWRIGHT FETCH WRAPPERS ===
+def fetch_html_requests(url: str, headers: dict, timeout_s: int):
+    r = SESSION.get(
+        url,
+        headers=headers,
+        timeout=timeout_s,
+        proxies=proxies_for_url(url),
+    )
+    return r.status_code, r.url, r.text
+
+def fetch_html_playwright(url: str, timeout_ms: int):
+    """
+    Fetch rendered HTML with Playwright. Blocks images/fonts/media to save bandwidth.
+    Returns (status_code, final_url, html).
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        # fallback
+        return 0, url, ""
+
+    proxy_cfg = playwright_proxy_for_url(url)
+
+    with sync_playwright() as p:
+        launch_kwargs = {"headless": True}
+        if proxy_cfg:
+            launch_kwargs["proxy"] = proxy_cfg
+
+        browser = p.chromium.launch(**launch_kwargs)
+        context = browser.new_context()
+
+        page = context.new_page()
+
+        # Block heavy resources to save data
+        def route_filter(route):
+            rt = route.request.resource_type
+            if rt in ("image", "media", "font"):
+                return route.abort()
+            return route.continue_()
+
+        page.route("**/*", route_filter)
+
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        html = page.content()
+        final_url = page.url
+
+        browser.close()
+        return 200, final_url, html
+
+def fetch_html(url: str, headers: dict, timeout_s: int):
+    """
+    Unified fetch:
+    - Playwright for PLAYWRIGHT_DOMAINS (if installed)
+    - requests otherwise (with Decodo proxy only for DECODO_BLOCKED_DOMAINS)
+    """
+    if should_use_playwright(url) and PLAYWRIGHT_AVAILABLE:
+        return fetch_html_playwright(url, timeout_ms=min(timeout_s, MAX_TIMEOUT) * 1000)
+    return fetch_html_requests(url, headers=headers, timeout_s=min(timeout_s, MAX_TIMEOUT))
+
+
+# === DATABASE ===
 def init_db_pool():
     global DB_POOL
     print(f"🔌 Checking database connection...")
@@ -195,6 +338,8 @@ def return_db_connection(conn):
         conn.close()
 
 def init_database():
+    if not DATABASE_URL:
+        return False
     conn = None
     try:
         conn = get_db_connection()
@@ -239,6 +384,9 @@ def init_database():
 
 def load_ping_state():
     global LAST_HOURLY_PING, LAST_DAILY_PING
+    if not DATABASE_URL:
+        print("⚠️ Skipping ping state load (no DATABASE_URL).")
+        return
     conn = None
     try:
         conn = get_db_connection()
@@ -260,6 +408,8 @@ def load_ping_state():
             return_db_connection(conn)
 
 def save_ping_state(ping_type, value):
+    if not DATABASE_URL:
+        return
     for attempt in range(3):
         conn = None
         try:
@@ -330,7 +480,7 @@ OUT_OF_STOCK_TERMS = [
 
 # Text-based IN terms (fallback if no button found)
 IN_STOCK_TEXT_TERMS = [
-    "in stock", "available now", "available to buy", "item in stock", 
+    "in stock", "available now", "available to buy", "item in stock",
     "stock available", "stock: available", "instock", "in-stock",
     "ready to ship", "ships today", "in stock now",
     "only a few left", "low stock", "limited stock", "few remaining"
@@ -352,11 +502,9 @@ def is_element_hidden(element):
     """Check if element or any parent is hidden via style or class"""
     current = element
     while current and hasattr(current, 'get'):
-        # Check inline style for display:none
         style = current.get('style', '')
         if style and ('display:none' in style.replace(' ', '') or 'display: none' in style):
             return True
-        # Check for hidden classes
         classes = current.get('class', [])
         class_str = ' '.join(classes).lower() if classes else ''
         if 'hidden' in class_str or 'hide' in class_str or 'd-none' in class_str:
@@ -366,43 +514,26 @@ def is_element_hidden(element):
 
 def has_active_add_to_cart_button(soup):
     """Check if page has an actual add-to-cart button that isn't disabled or hidden"""
-    # Look for button and input elements
     buttons = soup.find_all(['button', 'input'])
-    
     for btn in buttons:
-        # Get button text
-        btn_text = ""
-        if btn.name == 'input':
-            btn_text = btn.get('value', '')
-        else:
-            btn_text = btn.get_text(strip=True)
-        
-        btn_text_lower = btn_text.lower()
-        
-        # Check if it's an add-to-cart type button
-        if ADD_TO_CART_PATTERN.search(btn_text_lower):
-            # Check if NOT disabled
+        btn_text = btn.get('value', '') if btn.name == 'input' else btn.get_text(strip=True)
+        if ADD_TO_CART_PATTERN.search(btn_text.lower()):
             is_disabled = (
                 btn.get('disabled') is not None or
                 'disabled' in btn.get('class', []) or
                 btn.get('aria-disabled') == 'true'
             )
-            # Check if NOT hidden
             is_hidden = is_element_hidden(btn)
-            
             if not is_disabled and not is_hidden:
                 return True
-    
     return False
 
 def find_main_product_area(soup):
     """Find the main product section (not related products)"""
-    # Check for Wix data-hook attribute first
     wix_product = soup.find(attrs={'data-hook': 'product-page'})
     if wix_product:
         return wix_product
-    
-    # Common classes for main product area
+
     main_selectors = [
         'product-essential', 'product-main', 'product-info-main',
         'product-details-wrapper', 'product-single', 'pdp-main',
@@ -417,46 +548,36 @@ def find_main_product_area(soup):
 def classify_stock_with_soup(soup, page_text, raw_html):
     """Smarter stock detection using HTML structure"""
     text_lower = page_text.lower()
-    
-    # 1. Try to find main product area first - if found, use it exclusively
     main_area = find_main_product_area(soup)
-    
+
     if main_area:
         main_text = main_area.get_text().lower()
-        # Check main area for OUT terms first
         if OUT_OF_STOCK_PATTERN.search(main_text):
             return "out"
-        # Check main area for active Add to Cart button
         if has_active_add_to_cart_button(main_area):
             if PREORDER_PATTERN.search(main_text):
                 return "preorder"
             return "in"
-        # Check main area for preorder
         if PREORDER_PATTERN.search(main_text):
             return "preorder"
-        # Main area found but no clear indicators - default out
         return "out"
-    
-    # 2. No main area found - use original logic (OUT terms first)
+
     if OUT_OF_STOCK_PATTERN.search(text_lower):
         return "out"
-    
-    # 3. Check for active add-to-cart BUTTON
+
     if has_active_add_to_cart_button(soup):
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
-    
-    # 4. Check for stock indicator text
+
     if IN_STOCK_TEXT_PATTERN.search(text_lower):
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
-    
-    # 5. Check for preorder terms alone
+
     if PREORDER_PATTERN.search(text_lower):
         return "preorder"
-    
+
     return "out"
 
 def classify_stock(text):
@@ -620,6 +741,8 @@ def load_direct_state():
     return direct_state
 
 def save_product(product_url, product_name, in_stock, retry=True):
+    if not DATABASE_URL:
+        return
     conn = None
     try:
         conn = get_db_connection()
@@ -627,8 +750,8 @@ def save_product(product_url, product_name, in_stock, retry=True):
         cur.execute("""
             INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen)
             VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (store_url, product_url) 
-            DO UPDATE SET product_name = EXCLUDED.product_name, 
+            ON CONFLICT (store_url, product_url)
+            DO UPDATE SET product_name = EXCLUDED.product_name,
                           in_stock = EXCLUDED.in_stock,
                           last_seen = CURRENT_TIMESTAMP
         """, (product_url, product_url, product_name, in_stock))
@@ -648,12 +771,14 @@ def save_product(product_url, product_name, in_stock, retry=True):
             print(f"⚠️ Error saving product: {e}")
 
 def mark_alerted(product_url):
+    if not DATABASE_URL:
+        return
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("""
-            UPDATE product_state 
+            UPDATE product_state
             SET last_alerted = CURRENT_TIMESTAMP
             WHERE product_url = %s
         """, (product_url,))
@@ -679,7 +804,7 @@ def mark_verified_now(product_url):
 def should_alert(last_alerted):
     return True  # Always alert on change (no cooldown)
 
-def send_alert(product_name, url, store_name, is_preorder=False, is_new=False, 
+def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
                image_url=None, price=None, store_file=None):
     webhook_url = None
     role_id = None
@@ -748,24 +873,40 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     except Exception as e:
         print(f"❌ Discord error: {e}")
 
+def get_headers_for_url(url):
+    if USE_MOBILE_HEADERS:
+        return MOBILE_HEADERS
+    return HEADERS
+
+def get_timeout_for_url(url):
+    slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
+    if any(site in url for site in slow_sites):
+        return 30
+    return 15
+
 def confirm_product_stock(product_url, check_redirect=False):
+    """
+    Used for verification-style checks. Now supports Playwright for PLAYWRIGHT_DOMAINS.
+    """
     try:
         headers = get_headers_for_url(product_url)
         timeout = get_timeout_for_url(product_url)
-        r = SESSION.get(product_url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
 
-        if r.status_code != 200:
+        status_code, final_url, html = fetch_html(product_url, headers=headers, timeout_s=timeout)
+
+        # If playwright isn't available and we asked for it, status_code may be 0 with empty html.
+        if status_code != 200 or not html:
             return "unknown", None, None, None
-        
+
         if check_redirect:
             original_path = urlparse(product_url).path.rstrip('/')
-            final_path = urlparse(r.url).path.rstrip('/')
+            final_path = urlparse(final_url).path.rstrip('/')
             if final_path == '' or final_path == '/' or (original_path != final_path and len(final_path) < 10):
                 return "redirected", None, None, None
 
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         page_text = soup.get_text()
-        raw_html = r.text
+        raw_html = html
 
         product_name = None
         title_tag = soup.find('title')
@@ -799,7 +940,7 @@ def confirm_product_stock(product_url, check_redirect=False):
                     break
 
         price = None
-        price_selectors = ['.price', '.product-price', 'meta[property="product:price:amount"]']
+        price_selectors = ['.price', '.product-price', 'meta[property="product:price:amount"]', '[data-hook="formatted-primary-price"]']
         for selector in price_selectors:
             elem = soup.select_one(selector)
             if elem:
@@ -807,7 +948,7 @@ def confirm_product_stock(product_url, check_redirect=False):
                     price = f"£{elem.get('content')}"
                 else:
                     price_text = elem.get_text(strip=True)
-                    match = re.search(r'£[\d,]+\.?\d*', price_text)
+                    match = re.search(r'[£$€][\d,]+\.?\d*', price_text)
                     if match:
                         price = match.group()
                 break
@@ -816,24 +957,11 @@ def confirm_product_stock(product_url, check_redirect=False):
             return "unknown", product_name, image_url, price
 
         stock_status = classify_stock_with_soup(soup, page_text, raw_html)
-
         return stock_status, product_name, image_url, price
 
     except Exception as e:
         print(f"❌ confirm_product_stock error: {e}")
         return "unknown", None, None, None
-
-def get_headers_for_url(url):
-    # Rotate between desktop and mobile headers each cycle
-    if USE_MOBILE_HEADERS:
-        return MOBILE_HEADERS
-    return HEADERS
-
-def get_timeout_for_url(url):
-    slow_sites = ["very.co.uk", "game.co.uk", "johnlewis.com", "argos.co.uk"]
-    if any(site in url for site in slow_sites):
-        return 30
-    return 15
 
 def check_direct_product(url, previous_state, stats, store_file=None, is_verification=False, is_dormant=False):
     if is_site_in_failure_cooldown(url):
@@ -845,34 +973,35 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
     try:
         headers = get_headers_for_url(url)
         timeout = get_timeout_for_url(url)
-        r = SESSION.get(url, headers=headers, timeout=min(timeout, MAX_TIMEOUT))
 
-        if r.status_code != 200:
+        status_code, final_url, html = fetch_html(url, headers=headers, timeout_s=timeout)
+
+        if status_code != 200 or not html:
             domain = urlparse(url).netloc
             file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
             if is_dormant:
-                print(f"OUT - page removed ({r.status_code})")
+                print(f"OUT - page removed ({status_code})")
                 return {"name": None, "in_stock": False, "stock_status": "out", "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
-            print(f"⚠️ Failed ({r.status_code})")
+            print(f"⚠️ Failed ({status_code})")
             mark_site_failed(url)
             if not is_verification:
                 stats['failed'] += 1
-                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {r.status_code}"})
+                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {status_code}"})
             return None, None
-        
+
         if is_dormant:
             original_path = urlparse(url).path.rstrip('/')
-            final_path = urlparse(r.url).path.rstrip('/')
+            final_path = urlparse(final_url).path.rstrip('/')
             if final_path == '' or final_path == '/' or (original_path != final_path and len(final_path) < 10):
                 print(f"OUT - redirected")
                 return {"name": None, "in_stock": False, "stock_status": "out", "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
-        
+
         if not is_verification:
             stats['fetched'] += 1
 
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         page_text = soup.get_text()
-        raw_html = r.text
+        raw_html = html
 
         product_name = None
         title_tag = soup.find('title')
@@ -888,7 +1017,6 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         stock_status = classify_stock_with_soup(soup, page_text, raw_html)
         is_available = stock_status in ("in", "preorder")
 
-        # Extract image URL
         image_url = None
         img_selectors = [
             'img.product-featured-image', 'img.product-image', 'img.product__image',
@@ -909,7 +1037,6 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                         image_url = f"{parsed.scheme}://{parsed.netloc}{image_url}"
                     break
 
-        # Extract price
         price = None
         price_selectors = ['.price', '.product-price', 'meta[property="product:price:amount"]', '[data-hook="formatted-primary-price"]']
         for selector in price_selectors:
@@ -982,6 +1109,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
             HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": str(e)[:50]})
         return None, None
 
+
 def main():
     global CURRENT_WEBHOOK, CURRENT_ROLE_ID
 
@@ -989,22 +1117,31 @@ def main():
     print(f"   Time: {datetime.now(timezone.utc)}")
     print(f"   Production mode: {IS_PRODUCTION}")
     print(f"   Franchises: {', '.join(f['name'] for f in FRANCHISES)}")
+    print(f"   Playwright available: {PLAYWRIGHT_AVAILABLE}")
+    if PLAYWRIGHT_AVAILABLE:
+        print(f"   Playwright domains: {', '.join(sorted(PLAYWRIGHT_DOMAINS))}")
 
-    if not init_db_pool():
-        print("❌ Database pool failed. Exiting.")
-        return
-    if not init_database():
-        print("❌ Database init failed. Exiting.")
-        return
+    db_ok = init_db_pool()
+    if not db_ok:
+        print("⚠️ Database not configured. Continuing without database.")
+    else:
+        if not init_database():
+            print("⚠️ Database init failed. Continuing without database.")
+            db_ok = False
 
-    sync_urls_to_db()
-    load_ping_state()
+    if db_ok:
+        sync_urls_to_db()
+        load_ping_state()
+        direct_state = load_direct_state()
+    else:
+        direct_state = {}
 
-    direct_state = load_direct_state()
     first_run = len(direct_state) == 0
-
     if first_run:
         print("🆕 First run - building initial database (no alerts)...")
+        for franchise in FRANCHISES:
+            for fp in franchise.get("direct_files", []):
+                _ = load_urls_from_db(fp)
 
     for franchise in FRANCHISES:
         direct_files = franchise.get("direct_files", [])
@@ -1016,9 +1153,9 @@ def main():
         USE_MOBILE_HEADERS = not USE_MOBILE_HEADERS
         header_type = "📱 Mobile" if USE_MOBILE_HEADERS else "🖥️ Desktop"
 
-        if not IS_PRODUCTION:
+        if db_ok and not IS_PRODUCTION:
             sync_urls_to_db()
-        
+
         cycle_start = time.time()
         total_cycle_changes = 0
         total_stats = {'fetched': 0, 'failed': 0}
@@ -1035,7 +1172,6 @@ def main():
             print(f"{'='*50}")
 
             direct_files = franchise.get("direct_files", [])
-            
             if not direct_files:
                 print(f"   No direct files for {franchise_name}")
                 continue
@@ -1043,17 +1179,15 @@ def main():
             stats = {'fetched': 0, 'failed': 0}
             franchise_changes = 0
 
-            # Scan each file separately for clearer logging
             dormant_files = franchise.get("dormant_files", [])
             for file_path in direct_files:
                 file_name = file_path.split('/')[-1].replace('.txt', '')
                 file_urls = load_urls_from_db(file_path)
                 is_dormant = file_path in dormant_files
-                
+
                 if not file_urls:
                     continue
-                
-                # Initialize per-file stats tracking (skip for dormant files)
+
                 global HOURLY_STATS, DAILY_STATS
                 if not is_dormant:
                     if file_name not in HOURLY_STATS:
@@ -1064,18 +1198,19 @@ def main():
                         DAILY_STATS[file_name] = {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': len(file_urls)}
                     else:
                         DAILY_STATS[file_name]['products'] = len(file_urls)
-                
+
                 file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0, 'skipped': 0}
-                
                 dormant_label = " [DORMANT]" if is_dormant else ""
                 print(f"\n📁 {file_name}{dormant_label} ({len(file_urls)} products)")
-                
+
                 for url in file_urls:
                     store_name = urlparse(url).netloc
                     print(f"  Checking: {store_name}...", end=" ")
 
                     prev_state = direct_state.get(url)
-                    current_state, change = check_direct_product(url, prev_state, file_stats, store_file=file_path, is_dormant=is_dormant)
+                    current_state, change = check_direct_product(
+                        url, prev_state, file_stats, store_file=file_path, is_dormant=is_dormant
+                    )
 
                     if current_state:
                         direct_state[url] = current_state
@@ -1084,10 +1219,12 @@ def main():
                         if change and not first_run:
                             print(f"🔍 Potential {change.get('type', 'change')} - verifying...", end=" ")
                             time.sleep(5)
-                            verified_state, _ = check_direct_product(url, direct_state.get(url), file_stats, store_file=file_path, is_verification=True, is_dormant=is_dormant)
+                            verified_state, _ = check_direct_product(
+                                url, direct_state.get(url), file_stats,
+                                store_file=file_path, is_verification=True, is_dormant=is_dormant
+                            )
                             if verified_state:
                                 verified_status = verified_state.get("stock_status", "unknown")
-
                                 if verified_status in ("in", "preorder"):
                                     direct_state[url]["in_stock"] = True
                                     last_alerted = direct_state[url].get("last_alerted")
@@ -1098,13 +1235,14 @@ def main():
                                         file_stats['alerts'] += 1
                                         is_preorder = verified_status == "preorder"
                                         print(f"✅ {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
-                                        # Get image and price from verified state or original change
                                         img = verified_state.get("image_url") or change.get("image_url")
                                         prc = verified_state.get("price") or change.get("price")
-                                        send_alert(change['name'], change["url"], store_name,
-                                                  is_preorder=is_preorder, is_new=False,
-                                                  image_url=img, price=prc,
-                                                  store_file=file_path)
+                                        send_alert(
+                                            change['name'], change["url"], store_name,
+                                            is_preorder=is_preorder, is_new=False,
+                                            image_url=img, price=prc,
+                                            store_file=file_path
+                                        )
                                         direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
                                         save_product(url, current_state["name"], True)
                                         mark_alerted(url)
@@ -1114,10 +1252,8 @@ def main():
                             else:
                                 print(f"❌ Verification failed (no response)")
                         else:
-                            # Show more informative status for items already in stock
-                            # Skip printing for dormant files that already printed their status
                             if is_dormant and detailed_status == "OUT":
-                                pass  # Already printed by check_direct_product
+                                pass
                             elif detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
                                 print(f"{detailed_status} - ping already sent")
                             else:
@@ -1129,7 +1265,6 @@ def main():
 
                     time.sleep(1)
 
-                # Accumulate file stats into HOURLY_STATS and DAILY_STATS (skip dormant files)
                 if not is_dormant:
                     HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
                     HOURLY_STATS[file_name]['failed'] += file_stats['failed']
@@ -1137,8 +1272,7 @@ def main():
                     DAILY_STATS[file_name]['fetched'] += file_stats['fetched']
                     DAILY_STATS[file_name]['failed'] += file_stats['failed']
                     DAILY_STATS[file_name]['alerts'] += file_stats['alerts']
-                
-                # Also accumulate into franchise stats
+
                 stats['fetched'] += file_stats['fetched']
                 stats['failed'] += file_stats['failed']
 
@@ -1150,8 +1284,7 @@ def main():
             total_stats['failed'] += stats['failed']
 
         cycle_time = round(time.time() - cycle_start, 1)
-        
-        # Increment total scan count
+
         global TOTAL_SCANS, DAILY_SCANS
         TOTAL_SCANS += 1
         DAILY_SCANS += 1
@@ -1171,7 +1304,6 @@ def main():
 
         print(f"📈 Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | {header_type} | Cycle: {cycle_time}s")
 
-        # === HOURLY STATUS PING (exactly on the hour in London/UK time) ===
         global LAST_HOURLY_PING, LAST_DAILY_PING
         now_utc = datetime.now(timezone.utc)
         now_london = now_utc.astimezone(ZoneInfo("Europe/London"))
@@ -1179,22 +1311,20 @@ def main():
         current_day = now_london.strftime("%Y-%m-%d")
 
         if HOURLY_WEBHOOK := os.getenv("HOURLYDATA"):
-            # Only ping if we're in the first 15 minutes of the hour AND haven't pinged this hour
             if now_london.minute < 15 and LAST_HOURLY_PING != current_hour:
                 prev_hour = now_london - timedelta(hours=1)
                 time_range = f"{prev_hour.strftime('%H:%M')} - {now_london.strftime('%H:%M')}"
-                
-                # Build file breakdown
+
                 file_breakdown = ""
                 total_hourly_alerts = 0
                 total_hourly_fetched = 0
                 total_hourly_failed = 0
-                for file_name, stats in sorted(HOURLY_STATS.items()):
-                    file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
-                    total_hourly_alerts += stats['alerts']
-                    total_hourly_fetched += stats['fetched']
-                    total_hourly_failed += stats['failed']
-                
+                for file_name, st in sorted(HOURLY_STATS.items()):
+                    file_breakdown += f"  • **{file_name}**: {st['products']} products, {st['fetched']} fetched, {st['failed']} failed, {st['alerts']} alerts\n"
+                    total_hourly_alerts += st['alerts']
+                    total_hourly_fetched += st['fetched']
+                    total_hourly_failed += st['failed']
+
                 failed_sites_text = ""
                 if HOURLY_FAILED_DETAILS:
                     failed_sites_text = f"\n**Failed Requests ({len(HOURLY_FAILED_DETAILS)} total)**\n"
@@ -1230,23 +1360,20 @@ def main():
                 except Exception as e:
                     print(f"⚠️ Hourly ping failed: {e}")
 
-        # === DAILY STATUS PING (at 8:00 AM UK time the following day) ===
         if DAILY_WEBHOOK := os.getenv("DAILYDATA"):
-            # Trigger at 8:00–8:15 AM UK time AND haven't pinged today
             if now_london.hour == 8 and now_london.minute < 15 and LAST_DAILY_PING != current_day:
                 yesterday = (now_london - timedelta(days=1)).strftime("%d %B %Y")
-                
-                # Build file breakdown for daily using DAILY_STATS (full day accumulation)
+
                 daily_file_breakdown = ""
                 daily_total_alerts = 0
                 daily_total_fetched = 0
                 daily_total_failed = 0
-                for file_name, stats in sorted(DAILY_STATS.items()):
-                    daily_file_breakdown += f"  • **{file_name}**: {stats['products']} products, {stats['fetched']} fetched, {stats['failed']} failed, {stats['alerts']} alerts\n"
-                    daily_total_alerts += stats['alerts']
-                    daily_total_fetched += stats['fetched']
-                    daily_total_failed += stats['failed']
-                
+                for file_name, st in sorted(DAILY_STATS.items()):
+                    daily_file_breakdown += f"  • **{file_name}**: {st['products']} products, {st['fetched']} fetched, {st['failed']} failed, {st['alerts']} alerts\n"
+                    daily_total_alerts += st['alerts']
+                    daily_total_fetched += st['fetched']
+                    daily_total_failed += st['failed']
+
                 daily_summary = (
                     f"📅 **Daily Bot Report – {yesterday}**\n\n"
                     f"**Overall Summary**\n"
@@ -1276,6 +1403,7 @@ def main():
 
         print(f"⏱️ Next scan in {CHECK_INTERVAL} seconds...\n")
         time.sleep(CHECK_INTERVAL)
+
 
 if __name__ == "__main__":
     main()
