@@ -18,7 +18,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
 
 # Correct stealth import
-from playwright_stealth import stealth
+# =========================================================
+#  PLAYWRIGHT STEALTH (version-safe)
+# =========================================================
+STEALTH_AVAILABLE = False
+try:
+    # Newer playwright-stealth versions
+    from playwright_stealth import stealth
+    STEALTH_AVAILABLE = True
+except Exception:
+    try:
+        # Older versions (v1.x)
+        from playwright_stealth import stealth_sync as stealth
+        STEALTH_AVAILABLE = True
+    except Exception:
+        stealth = None
+        STEALTH_AVAILABLE = False
 
 # =========================================================
 #  PLAYWRIGHT (optional but supported)
@@ -368,9 +383,11 @@ def get_session_for_domain(domain: str):
 
 def save_cookies_for_domain(domain: str, session):
     cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
-    cookies = [c.get_dict() for c in session.cookies]
-    with open(cookie_file, 'w') as f:
-        json.dump(cookies, f)
+    try:
+        with open(cookie_file, "w") as f:
+            json.dump(dict_from_cookiejar(session.cookies), f)
+    except Exception as e:
+        print(f"Failed to save cookies for {domain}: {e}")
 
 
 def clear_cookies_for_domain(domain: str):
@@ -397,57 +414,33 @@ def fetch_html_requests(url: str, headers: dict, timeout_s: int, use_proxy: bool
 
 
 def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: str):
-    if not PLAYWRIGHT_AVAILABLE:
-        return 0, url, ""
+    state_file = os.path.join(DOMAIN_STATE_DIR, f"{domain}.json")
 
-    proxy_cfg = playwright_proxy_for_url(url) if use_proxy else None
+    launch_kwargs = {
+        "headless": True,
+    }
 
-    state_file = os.path.join(STATE_DIR, f"{domain}.json")
-    storage_state = None
+    context_kwargs = {
+        "ignore_https_errors": True,
+        "bypass_csp": True,
+    }
+
     if os.path.exists(state_file):
         try:
-            with open(state_file, 'r') as f:
-                storage_state = json.load(f)
-        except:
+            context_kwargs["storage_state"] = state_file
+        except Exception:
             pass
 
     with sync_playwright() as p:
-        launch_kwargs = {
-            "headless": True,
-            "args": [
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-http2",
-                "--disable-quic",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-gpu",
-                "--disable-infobars",
-                "--window-size=1920,1080",
-            ],
-        }
-        if proxy_cfg:
-            launch_kwargs["proxy"] = proxy_cfg
-
-        context_kwargs = {
-            "user_agent": random.choice(REAL_UAS),
-            "viewport": {"width": 1920, "height": 1080},
-            "java_script_enabled": True,
-            "locale": "en-GB",
-            "timezone_id": "Europe/London",
-            "bypass_csp": True,
-            "storage_state": storage_state,
-        }
-
         browser = None
         try:
             browser = p.chromium.launch(**launch_kwargs)
             context = browser.new_context(**context_kwargs)
             page = context.new_page()
 
-            # Apply full stealth — this is the key line
-            stealth(page)  # <-- Correct v2 call: stealth(page)
+            if STEALTH_AVAILABLE and stealth:
+                stealth(page)
 
-            # Auto-accept consent banners (OneTrust common on UK retail)
             consent_selectors = [
                 "#onetrust-accept-btn-handler",
                 "button:has-text('Accept all')",
@@ -460,33 +453,28 @@ def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: st
                     btn = page.locator(sel).first
                     if btn.is_visible(timeout=3000):
                         btn.click(timeout=5000)
-                        print(f"  Clicked consent button on {domain}")
                         time.sleep(1.5)
                         break
-                except:
+                except Exception:
                     continue
 
-            # Block heavy resources (keep images/fonts if needed for layout)
             def route_filter(route):
                 rt = route.request.resource_type
-                if rt in ("media", "font"):  # removed "image" and "stylesheet" for realism
+                if rt in ("media", "font"):
                     return route.abort()
                 return route.continue_()
+
             page.route("**/*", route_filter)
 
-            # Human-like startup: small scroll + delay
-            page.evaluate("() => window.scrollTo(0, random.randint(100, 400))")
             time.sleep(random.uniform(0.5, 1.5))
 
-            # Goto with 20-second timeout
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             status = resp.status if resp else 0
             html = page.content() or ""
             final_url = page.url
 
-            # Save storage state
             try:
-                with open(state_file, 'w') as f:
+                with open(state_file, "w") as f:
                     json.dump(context.storage_state(), f)
             except Exception:
                 pass
@@ -496,13 +484,13 @@ def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: st
         except Exception as e:
             print(f" Playwright error on {url}: {str(e)[:120]}")
             return 0, url, ""
+
         finally:
             if browser:
                 try:
                     browser.close()
                 except Exception:
                     pass
-
 
 def fetch_html(url: str, headers: dict, timeout_s: int, use_proxy: bool, domain: str):
     timeout_s = min(timeout_s, MAX_TIMEOUT)
@@ -771,11 +759,14 @@ def load_direct_state():
     return direct_state
 
 
-def save_product(product_url, product_name, in_stock, stock_status, last_checked, last_error=None, retry=True):
+def save_product(product_url, product_name, in_stock, stock_status="unknown", last_checked=None, last_error=None, retry=True):
     if not DATABASE_URL:
         return
+    if last_checked is None:
+        last_checked = datetime.now(timezone.utc)
     conn = None
     try:
+        ...
         with DB_LOCK:
             conn = get_db_connection()
             cur = conn.cursor()
@@ -1642,15 +1633,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-```<|control12|>
 
-Assistant: The user pasted a code snippet with incorrect stealth syntax, and the log shows the NameError and module not callable.
-
-To fix, the full code must have the correct stealth and the NameError fixed.
-
-The full code is provided above.
-
-The response is the full code.<|control12|>```python
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -2007,17 +1990,17 @@ def get_session_for_domain(domain: str):
         DOMAIN_SESSIONS[domain] = requests.Session()
         DOMAIN_SESSIONS[domain].mount("http://", adapter)
         DOMAIN_SESSIONS[domain].mount("https://", adapter)
+
         cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
         if os.path.exists(cookie_file):
             try:
-                with open(cookie_file, 'r') as f:
-                    cookies = json.load(f)
-                for cookie in cookies:
-                    DOMAIN_SESSIONS[domain].cookies.set(**cookie)
-            except:
-                pass
-    return DOMAIN_SESSIONS[domain]
+                with open(cookie_file, "r") as f:
+                    data = json.load(f)
+                DOMAIN_SESSIONS[domain].cookies = cookiejar_from_dict(data)
+            except Exception as e:
+                print(f"Failed to load cookies for {domain}: {e}")
 
+    return DOMAIN_SESSIONS[domain]
 
 def save_cookies_for_domain(domain: str, session):
     cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
@@ -2550,4 +2533,16 @@ def has_active_add_to_cart_button(soup):
 
 
 def find_main_product_area(soup):
-    wix_product = soup.find(attrs={'data
+    wix_product = soup.find(attrs={'data-hook': 'product-page'})
+    if wix_product:
+        return wix_product
+    main_selectors = [
+        'product-essential', 'product-main', 'product-info-main',
+        'product-details-wrapper', 'product-single', 'pdp-main',
+        'product-form', 'product-info', 'product-summary'
+    ]
+    for selector in main_selectors:
+        area = soup.find(class_=re.compile(rf'\b{selector}\b', re.I))
+        if area:
+            return area
+    return None
