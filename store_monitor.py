@@ -17,15 +17,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
 
-# Suggestion 2: curl_cffi mimics Chrome's TLS fingerprint — drop-in for hostile domains
-# Install with: pip install curl-cffi
-CURL_CFFI_AVAILABLE = False
-try:
-    from curl_cffi import requests as cffi_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    pass
-
+# NEW: Import stealth
+from playwright_stealth import stealth_sync
 
 # =========================================================
 #  PLAYWRIGHT (optional but supported)
@@ -39,30 +32,66 @@ except Exception:
 
 
 # =========================================================
-#  PROXY & DOMAINS (REVISED)
+#  DECODO PROXY SUPPORT (requests + optional Playwright proxy)
 # =========================================================
-HOSTILE_DOMAINS = {
-    "johnlewis.com",
-    "very.co.uk",
-    "sportsdirect.com",
-}
-
-# Use proxy ONLY for these domains. Keep this small and justified.
-PROXY_REQUIRED_DOMAINS = {
-    # "some-site-that-blocks-your-server-ip.com",
-}
-
-# Never use proxy for these (proxy causes 418/ERR_PROXY etc.)
-PROXY_BANNED_DOMAINS = {
-    "johnlewis.com",
-    "very.co.uk",
-    "sportsdirect.com",
+DECODO_BLOCKED_DOMAINS = {
     "thetoyplanet.co.uk",
+    "johnlewis.com",
+    # Add more as needed
 }
 
-# Domains that are hostile / unreliable and must ALWAYS use Playwright
-FORCE_PLAYWRIGHT_DOMAINS = {
-    "johnlewis.com",
+
+def _host_for_url(url: str) -> str:
+    try:
+        host = url.split("/")[2].lower()
+    except Exception:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def proxies_for_url(url: str):
+    host = _host_for_url(url)
+    if not host or host not in DECODO_BLOCKED_DOMAINS:
+        return None
+
+    user = os.getenv("DECODO_USER")
+    pw = os.getenv("DECODO_PASS")
+    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
+    proxy_port = os.getenv("DECODO_PORT", "10000")
+
+    if not user or not pw:
+        return None
+
+    proxy = f"http://{user}:{pw}@{proxy_host}:{proxy_port}"
+    return {"http": proxy, "https": proxy}
+
+
+def playwright_proxy_for_url(url: str):
+    host = _host_for_url(url)
+    if not host or host not in DECODO_BLOCKED_DOMAINS:
+        return None
+
+    user = os.getenv("DECODO_USER")
+    pw = os.getenv("DECODO_PASS")
+    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
+    proxy_port = os.getenv("DECODO_PORT", "10000")
+
+    if not user or not pw:
+        return None
+
+    return {
+        "server": f"http://{proxy_host}:{proxy_port}",
+        "username": user,
+        "password": pw,
+    }
+
+
+# =========================================================
+#  PLAYWRIGHT DOMAINS (JS-heavy / bot-protected)
+# =========================================================
+PLAYWRIGHT_DOMAINS = {
     "argos.co.uk",
     "freemans.com",
     "currys.co.uk",
@@ -73,6 +102,7 @@ FORCE_PLAYWRIGHT_DOMAINS = {
     "hillscards.co.uk",
     "hmv.com",
     "jdwilliams.co.uk",
+    "johnlewis.com",
     "sportsdirect.com",
     "very.co.uk",
     "waylandgames.co.uk",
@@ -84,131 +114,19 @@ FORCE_PLAYWRIGHT_DOMAINS = {
     "tritex-games.co.uk",
 }
 
-CONSENT_SELECTORS = {
-    "johnlewis.com": [
-        "button:has-text('Accept all')",
-        "button:has-text('Accept All')",
-        "button:has-text('Accept')",
-        "#onetrust-accept-btn-handler",
-        "button#onetrust-accept-btn-handler",
-    ],
-    "very.co.uk": [
-        "#onetrust-accept-btn-handler",
-        "button:has-text('Accept all')",
-        "button:has-text('Accept')",
-    ],
-    "sportsdirect.com": [
-        "#onetrust-accept-btn-handler",
-        "button:has-text('Accept all')",
-        "button:has-text('Accept')",
-    ],
-}
-
-
-def _host_for_url(url: str) -> str | None:
-    """Extract bare hostname. Returns None if parsing fails or result is empty."""
-    try:
-        host = url.split("/")[2].lower()
-        result = host[4:] if host.startswith("www.") else host
-        return result if result else None
-    except Exception:
-        return None
-
-
-def proxies_for_url(url: str):
-    domain = _host_for_url(url)
-    if not domain:
-        return None
-    if domain in PROXY_BANNED_DOMAINS:
-        return None
-    if domain not in PROXY_REQUIRED_DOMAINS:
-        return None
-    user = os.getenv("DECODO_USER")
-    pw = os.getenv("DECODO_PASS")
-    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
-    proxy_port = os.getenv("DECODO_PORT", "10000")
-    if not user or not pw:
-        return None
-    proxy = f"http://{user}:{pw}@{proxy_host}:{proxy_port}"
-    return {"http": proxy, "https": proxy}
-
-
-def playwright_proxy_for_url(url: str):
-    domain = _host_for_url(url)
-    if not domain:
-        return None
-    if domain in PROXY_BANNED_DOMAINS:
-        return None
-    if domain not in PROXY_REQUIRED_DOMAINS:
-        return None
-    user = os.getenv("DECODO_USER")
-    pw = os.getenv("DECODO_PASS")
-    proxy_host = os.getenv("DECODO_HOST", "proxy.decodo.com")
-    proxy_port = os.getenv("DECODO_PORT", "10000")
-    if not user or not pw:
-        return None
-    return {
-        "server": f"http://{proxy_host}:{proxy_port}",
-        "username": user,
-        "password": pw,
-    }
-
 
 def should_use_playwright(url: str) -> bool:
     host = _host_for_url(url)
-    return host in FORCE_PLAYWRIGHT_DOMAINS if host else False
+    return host in PLAYWRIGHT_DOMAINS
 
 
 # =========================================================
-#  DATABASE & GLOBALS
+#  DATABASE CONNECTION POOL
 # =========================================================
 DB_POOL = None
 MAX_TIMEOUT = 60
 IS_PRODUCTION = os.getenv("REPLIT_DEPLOYMENT") == "1"
 DATABASE_URL = os.getenv("DATABASE_URL")
-DB_LOCK = threading.Lock()
-
-DOMAIN_HEALTH = {}
-DOMAIN_HEALTH_LOCK = threading.Lock()
-DOMAIN_SESSIONS = {}
-DOMAIN_COOKIES_DIR = 'cookies'
-STATE_DIR = 'states'
-os.makedirs(DOMAIN_COOKIES_DIR, exist_ok=True)
-os.makedirs(STATE_DIR, exist_ok=True)
-
-HOURLY_FAILED_DETAILS = []
-HOURLY_FAILED_DETAILS_LOCK = threading.Lock()
-
-# =========================================================
-#  PER-DOMAIN IDENTITY (daily-stable UA/viewport/tz)
-# =========================================================
-IDENTITY_DIR = "identities"
-os.makedirs(IDENTITY_DIR, exist_ok=True)
-DOMAIN_IDENTITY = {}
-
-# =========================================================
-#  SOFT PACING & CONCURRENCY LIMITS
-# =========================================================
-DOMAIN_LIMITS = {
-    "johnlewis.com":    {"max_concurrent": 1, "min_interval_s": 75},
-    "very.co.uk":       {"max_concurrent": 1, "min_interval_s": 75},
-    "sportsdirect.com": {"max_concurrent": 1, "min_interval_s": 60},
-}
-DEFAULT_MAX_CONCURRENT_PER_DOMAIN = 3
-DEFAULT_MIN_INTERVAL_S = 0
-
-DOMAIN_SEMAPHORES = {}
-DOMAIN_LAST_HIT = {}
-DOMAIN_LAST_HIT_LOCK = threading.Lock()
-
-# Cap concurrent Playwright browser instances to avoid memory spikes.
-# Each headless Chromium uses 200-400MB; tune based on available RAM.
-MAX_CONCURRENT_PLAYWRIGHT = 3
-PLAYWRIGHT_SEMAPHORE = threading.Semaphore(MAX_CONCURRENT_PLAYWRIGHT)
-
-# Suggestion 1: store accepted client hint headers per domain
-DOMAIN_CLIENT_HINTS: dict[str, dict] = {}
-DOMAIN_CLIENT_HINTS_LOCK = threading.Lock()
 
 
 # =========================================================
@@ -228,11 +146,11 @@ FRANCHISES = [
         ],
         "webhook_secrets": [
             {"file": "Pokemon/Poke-30A.txt", "webhook": os.getenv("POKE30A")},
-            {"file": "Pokemon/Poke-AH.txt",  "webhook": os.getenv("POKEAH")},
-            {"file": "Pokemon/Poke-DR.txt",  "webhook": os.getenv("POKEDR")},
-            {"file": "Pokemon/Poke-ME.txt",  "webhook": os.getenv("POKEME")},
-            {"file": "Pokemon/Poke-PO.txt",  "webhook": os.getenv("POKEPO")},
-            {"file": "Pokemon/Poke-Other.txt","webhook": os.getenv("POKEOTHER")},
+            {"file": "Pokemon/Poke-AH.txt", "webhook": os.getenv("POKEAH")},
+            {"file": "Pokemon/Poke-DR.txt", "webhook": os.getenv("POKEDR")},
+            {"file": "Pokemon/Poke-ME.txt", "webhook": os.getenv("POKEME")},
+            {"file": "Pokemon/Poke-PO.txt", "webhook": os.getenv("POKEPO")},
+            {"file": "Pokemon/Poke-Other.txt", "webhook": os.getenv("POKEOTHER")},
         ],
         "dormant_files": ["Pokemon/Poke-Other.txt"]
     },
@@ -249,12 +167,12 @@ FRANCHISES = [
             "One Piece/OP-Other.txt"
         ],
         "webhook_secrets": [
-            {"file": "One Piece/EB-02.txt",    "webhook": os.getenv("EB02")},
-            {"file": "One Piece/EB-03.txt",    "webhook": os.getenv("EB03")},
-            {"file": "One Piece/IB-V5.txt",    "webhook": os.getenv("IBV5")},
-            {"file": "One Piece/IB-V6.txt",    "webhook": os.getenv("IBV6")},
-            {"file": "One Piece/OP-13.txt",    "webhook": os.getenv("OP13")},
-            {"file": "One Piece/OP-14.txt",    "webhook": os.getenv("OP14")},
+            {"file": "One Piece/EB-02.txt", "webhook": os.getenv("EB02")},
+            {"file": "One Piece/EB-03.txt", "webhook": os.getenv("EB03")},
+            {"file": "One Piece/IB-V5.txt", "webhook": os.getenv("IBV5")},
+            {"file": "One Piece/IB-V6.txt", "webhook": os.getenv("IBV6")},
+            {"file": "One Piece/OP-13.txt", "webhook": os.getenv("OP13")},
+            {"file": "One Piece/OP-14.txt", "webhook": os.getenv("OP14")},
             {"file": "One Piece/OP-Other.txt", "webhook": os.getenv("OPOTHER")},
         ]
     }
@@ -266,26 +184,25 @@ CURRENT_ROLE_ID = None
 
 
 # =========================================================
-#  SESSION — per-domain only (global SESSION kept for webhooks/pings only)
+#  SESSION (requests) + retries/backoff
 # =========================================================
-# total=1: one retry on transient 5xx. status_forcelist is meaningless at total=0.
 retry_strategy = Retry(
     total=1,
-    backoff_factor=0.5,
+    backoff_factor=1,
     status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=frozenset(["GET"]),  # Fix 4: never retry POSTs — avoids double Discord sends
-    raise_on_status=False,
+    allowed_methods=frozenset(["GET", "POST"])
 )
 adapter = HTTPAdapter(max_retries=retry_strategy)
 
-# SESSION is used ONLY for Discord webhooks and ping posts — not for scraping
 SESSION = requests.Session()
 SESSION.mount("http://", adapter)
 SESSION.mount("https://", adapter)
 
+DOMAIN_SESSIONS = {}
+
 
 # =========================================================
-#  HEADERS
+#  HEADERS: desktop/mobile (toggle each cycle) + realistic UAs
 # =========================================================
 REAL_UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -307,72 +224,18 @@ REFERERS = [
     None,
 ]
 
-# Optional A: daily-stable mobile/desktop flag — don't alternate every cycle
-# (alternating fingerprints can trip bot heuristics on some sites)
-USE_MOBILE_HEADERS = (int(datetime.now(ZoneInfo("Europe/London")).strftime("%d")) % 2 == 0)
-
-
-# =========================================================
-#  IDENTITY HELPERS
-# =========================================================
-def _identity_path(domain: str) -> str:
-    return os.path.join(IDENTITY_DIR, f"{domain}.json")
-
-
-def _today_key_london() -> str:
-    return datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
-
-
-def get_identity_for_domain(domain: str) -> dict:
-    """Stable per-domain identity that rotates daily — consistent 'return visitor' fingerprint."""
-    today = _today_key_london()
-    cached = DOMAIN_IDENTITY.get(domain)
-    if cached and cached.get("day") == today:
-        return cached
-    path = _identity_path(domain)
-    if os.path.exists(path):
-        try:
-            with open(path, "r") as f:
-                data = json.load(f)
-            if data.get("day") == today:
-                DOMAIN_IDENTITY[domain] = data
-                return data
-        except Exception:
-            pass
-    ua = random.choice(REAL_UAS)
-    viewport = random.choice([
-        {"width": 1920, "height": 1080},
-        {"width": 1366, "height": 768},
-        {"width": 1536, "height": 864},
-        {"width": 1440, "height": 900},
-    ])
-    ident = {
-        "day": today,
-        "ua": ua,
-        "lang": "en-GB,en;q=0.9",
-        "viewport": viewport,
-        "locale": "en-GB",
-        "timezone": "Europe/London",
-    }
-    try:
-        with open(path, "w") as f:
-            json.dump(ident, f)
-    except Exception:
-        pass
-    DOMAIN_IDENTITY[domain] = ident
-    return ident
+USE_MOBILE_HEADERS = False
 
 
 def get_headers_for_url(url: str) -> dict:
-    domain = _host_for_url(url)
-    ident = get_identity_for_domain(domain) if domain else {
-        "ua": random.choice(REAL_UAS), "lang": "en-GB,en;q=0.9"
-    }
+    ua = random.choice(REAL_UAS)
+    lang = random.choice(LANG_HEADERS)
     referer = random.choice(REFERERS)
+
     headers = {
-        "User-Agent": ident["ua"],
+        "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": ident["lang"],
+        "Accept-Language": lang,
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
@@ -383,783 +246,18 @@ def get_headers_for_url(url: str) -> dict:
     }
     if referer:
         headers["Referer"] = referer
+
     if USE_MOBILE_HEADERS:
-        headers["User-Agent"] = (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1"
-        )
-    # Suggestion 1: replay any client hint headers we previously captured for this domain
-    if domain:
-        with DOMAIN_CLIENT_HINTS_LOCK:
-            hints = DOMAIN_CLIENT_HINTS.get(domain, {})
-        headers.update(hints)
+        headers["User-Agent"] = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1"
+
     return headers
 
 
 # =========================================================
-#  SUGGESTION 1: CLIENT HINT CAPTURE
+#  OPTIMIZATION: Failed site cache (skip for 3 minutes)
 # =========================================================
-def capture_client_hints(domain: str, response_headers: dict):
-    """
-    After a successful response, read Accept-CH and store appropriate hint
-    values to replay on next request. Makes requests look like a real Chrome browser.
-    """
-    accept_ch = response_headers.get("Accept-CH", "") or response_headers.get("accept-ch", "")
-    if not accept_ch:
-        return
-    hints = {}
-    requested = {h.strip().lower() for h in accept_ch.split(",")}
-    if "sec-ch-ua" in requested:
-        hints["Sec-CH-UA"] = '"Chromium";v="122", "Not;A=Brand";v="24", "Google Chrome";v="122"'
-    if "sec-ch-ua-mobile" in requested:
-        hints["Sec-CH-UA-Mobile"] = "?0"
-    if "sec-ch-ua-platform" in requested:
-        hints["Sec-CH-UA-Platform"] = '"Windows"'
-    if "sec-ch-ua-platform-version" in requested:
-        hints["Sec-CH-UA-Platform-Version"] = '"15.0.0"'
-    if "sec-ch-ua-arch" in requested:
-        hints["Sec-CH-UA-Arch"] = '"x86"'
-    if "sec-ch-ua-bitness" in requested:
-        hints["Sec-CH-UA-Bitness"] = '"64"'
-    if "sec-ch-ua-full-version-list" in requested:
-        hints["Sec-CH-UA-Full-Version-List"] = (
-            '"Chromium";v="122.0.6261.94", "Not;A=Brand";v="24.0.0.0", "Google Chrome";v="122.0.6261.94"'
-        )
-    if "device-memory" in requested:
-        hints["Device-Memory"] = "8"
-    if "downlink" in requested:
-        hints["Downlink"] = "10"
-    if "ect" in requested:
-        hints["ECT"] = "4g"
-    if hints:
-        with DOMAIN_CLIENT_HINTS_LOCK:
-            DOMAIN_CLIENT_HINTS[domain] = hints
-        print(f"  Captured {len(hints)} client hint(s) for {domain}")
-
-
-# =========================================================
-#  SOFT PACING HELPERS
-# =========================================================
-def get_domain_limit(domain: str) -> dict:
-    cfg = DOMAIN_LIMITS.get(domain, {})
-    return {
-        "max_concurrent": cfg.get("max_concurrent", DEFAULT_MAX_CONCURRENT_PER_DOMAIN),
-        "min_interval_s": cfg.get("min_interval_s", DEFAULT_MIN_INTERVAL_S),
-    }
-
-
-def get_semaphore_for_domain(domain: str) -> threading.Semaphore:
-    if domain not in DOMAIN_SEMAPHORES:
-        cfg = get_domain_limit(domain)
-        DOMAIN_SEMAPHORES[domain] = threading.Semaphore(cfg["max_concurrent"])
-    return DOMAIN_SEMAPHORES[domain]
-
-
-def should_soft_throttle(domain: str, now_utc: datetime) -> tuple[bool, int]:
-    cfg = get_domain_limit(domain)
-    min_interval = int(cfg["min_interval_s"])
-    if min_interval <= 0:
-        return False, 0
-    with DOMAIN_LAST_HIT_LOCK:
-        last = DOMAIN_LAST_HIT.get(domain)
-    if not last:
-        return False, 0
-    delta = (now_utc - last).total_seconds()
-    if delta >= min_interval:
-        return False, 0
-    return True, int(min_interval - delta)
-
-
-def mark_domain_hit(domain: str, now_utc: datetime):
-    with DOMAIN_LAST_HIT_LOCK:
-        DOMAIN_LAST_HIT[domain] = now_utc
-
-
-# =========================================================
-#  SUGGESTION 4: __NEXT_DATA__ / JSON-LD STRUCTURED DATA PARSERS
-# =========================================================
-def extract_next_data(html: str) -> dict | None:
-    """Extract the __NEXT_DATA__ JSON blob embedded by Next.js sites (JL, Very, etc.)."""
-    try:
-        match = re.search(
-            r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
-            html, re.DOTALL
-        )
-        if match:
-            return json.loads(match.group(1))
-    except Exception:
-        pass
-    return None
-
-
-def extract_json_ld(html: str) -> list[dict]:
-    """Extract all JSON-LD blocks from a page (Product schema often has availability)."""
-    results = []
-    try:
-        for match in re.finditer(
-            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-            html, re.DOTALL
-        ):
-            try:
-                results.append(json.loads(match.group(1)))
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return results
-
-
-def _deep_get(d: dict, *keys):
-    """Safely traverse nested dicts without raising KeyError."""
-    for key in keys:
-        if not isinstance(d, dict):
-            return None
-        d = d.get(key)
-    return d
-
-
-def parse_stock_from_structured_data(html: str) -> tuple[bool | None, str | None]:
-    """
-    Suggestion 4: Try to determine stock status from structured data before
-    falling back to HTML scraping. Faster and more reliable for Next.js sites.
-    Returns (is_available, stock_status) or (None, None) if not found.
-    """
-    # --- JSON-LD first (schema.org Product) ---
-    for blob in extract_json_ld(html):
-        items = blob if isinstance(blob, list) else [blob]
-        i = 0
-        while i < len(items):
-            item = items[i]
-            i += 1
-            if not isinstance(item, dict):
-                continue
-            if "@graph" in item:
-                items.extend(item["@graph"])
-                continue
-            if item.get("@type") not in ("Product", "IndividualProduct"):
-                continue
-            offers = item.get("offers") or item.get("Offers")
-            if not offers:
-                continue
-            if isinstance(offers, list):
-                offers = offers[0]
-            availability = str(offers.get("availability", "")).lower()
-            if "instock" in availability:
-                return True, "in"
-            if "outofstock" in availability or "discontinued" in availability:
-                return False, "out"
-            if "preorder" in availability or "presale" in availability:
-                return False, "preorder"
-            if "limitedavailability" in availability:
-                return True, "in"
-
-    # --- __NEXT_DATA__ (Next.js — JL, Very, etc.) ---
-    next_data = extract_next_data(html)
-    if next_data:
-        candidates = [
-            _deep_get(next_data, "props", "pageProps", "product", "availability"),
-            _deep_get(next_data, "props", "pageProps", "product", "stockInfo", "stockLevel"),
-            _deep_get(next_data, "props", "pageProps", "stockInfo"),
-            _deep_get(next_data, "props", "pageProps", "availability"),
-        ]
-        for val in candidates:
-            if val is None:
-                continue
-            val_s = str(val).lower()
-            if any(k in val_s for k in ("instock", "in stock", "available", "in_stock")):
-                return True, "in"
-            if any(k in val_s for k in ("outofstock", "out of stock", "unavailable", "sold out", "out_of_stock")):
-                return False, "out"
-            if any(k in val_s for k in ("preorder", "pre-order", "presale")):
-                return False, "preorder"
-
-    return None, None
-
-
-# =========================================================
-#  COOKIE HELPERS
-# =========================================================
-def load_cookies_for_domain(domain: str, session):
-    cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
-    if os.path.exists(cookie_file):
-        try:
-            with open(cookie_file, 'r') as f:
-                data = json.load(f)
-            session.cookies = cookiejar_from_dict(data, session.cookies)
-        except Exception as e:
-            print(f"Failed to load cookies for {domain}: {e}")
-
-
-def save_cookies_for_domain(domain: str, session):
-    cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
-    try:
-        with open(cookie_file, 'w') as f:
-            json.dump(dict_from_cookiejar(session.cookies), f)
-    except Exception as e:
-        print(f"Failed to save cookies for {domain}: {e}")
-
-
-def clear_cookies_for_domain(domain: str):
-    for d in [DOMAIN_COOKIES_DIR, STATE_DIR]:
-        f = os.path.join(d, f"{domain}.json")
-        if os.path.exists(f):
-            os.remove(f)
-    if domain in DOMAIN_SESSIONS:
-        DOMAIN_SESSIONS[domain].cookies.clear()
-
-
-def get_session_for_domain(domain: str):
-    if domain not in DOMAIN_SESSIONS:
-        s = requests.Session()
-        s.mount("http://", adapter)
-        s.mount("https://", adapter)
-        load_cookies_for_domain(domain, s)
-        DOMAIN_SESSIONS[domain] = s
-    return DOMAIN_SESSIONS[domain]
-
-
-# =========================================================
-#  FETCH FUNCTIONS
-# =========================================================
-BLOCKED_MARKERS = [
-    # Fix 5: removed "robot" (too many false positives on toy sites) and bare "blocked"/"forbidden"
-    # Only match phrases specific enough that a real product page would never contain them
-    "captcha",
-    "you have been blocked",
-    "sorry, you have been blocked",
-    "access denied",
-    "cloudflare",
-    "verify you are human",
-    "enable cookies",
-    "ray id",  # Cloudflare block page signature
-]
-
-
-def fetch_html_requests(url: str, headers: dict, timeout_s: int, use_proxy: bool, domain: str):
-    """
-    Requests-based fetch with split connect/read timeouts.
-    Stable version (no curl_cffi).
-    """
-    proxies = proxies_for_url(url) if use_proxy else None
-
-    # Split timeouts: fast fail on connect, reasonable read window
-    connect_t = 4
-    read_t = max(5, min(timeout_s, 12))
-
-    session = get_session_for_domain(domain)
-
-    r = session.get(
-        url,
-        headers=headers,
-        timeout=(connect_t, read_t),
-        proxies=proxies,
-        allow_redirects=True,
-    )
-
-    capture_client_hints(domain, dict(r.headers))
-    return r.status_code, r.url, r.text
-
-
-def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: str):
-    """
-    Playwright-based fetch with realism tweaks.
-    Suggestion 1: captures client hints from response headers.
-    Suggestion 3: extended stealth init script.
-    """
-    if not PLAYWRIGHT_AVAILABLE:
-        return 0, url, ""
-
-    proxy_cfg = playwright_proxy_for_url(url) if use_proxy else None
-    ident = get_identity_for_domain(domain)
-
-    state_file = os.path.join(STATE_DIR, f"{domain}.json")
-    storage_state = None
-    if os.path.exists(state_file):
-        try:
-            with open(state_file, 'r') as f:
-                storage_state = json.load(f)
-        except Exception:
-            storage_state = None
-
-    with PLAYWRIGHT_SEMAPHORE:
-        with sync_playwright() as p:
-            launch_kwargs = {
-                "headless": True,
-                "args": [
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-http2",
-                    "--disable-quic",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-gpu",
-                    "--disable-infobars",
-                    f"--window-size={ident['viewport']['width']},{ident['viewport']['height']}",
-                ],
-            }
-            if proxy_cfg:
-                launch_kwargs["proxy"] = proxy_cfg
-
-            context_kwargs = {
-                "user_agent": ident["ua"],
-                "viewport": ident["viewport"],
-                "java_script_enabled": True,
-                "locale": ident["locale"],
-                "timezone_id": ident["timezone"],
-                "bypass_csp": True,
-                "storage_state": storage_state,
-            }
-
-            browser = None
-            captured_response_headers: dict = {}
-
-            try:
-                browser = p.chromium.launch(**launch_kwargs)
-                context = browser.new_context(**context_kwargs)
-                page = context.new_page()
-
-                # Suggestion 3: extended stealth — patches more fingerprint surfaces
-                page.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
-                    Object.defineProperty(navigator, 'language', { get: () => 'en-GB' });
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => {
-                            const arr = [1, 2, 3, 4, 5];
-                            arr.__proto__ = PluginArray.prototype;
-                            return arr;
-                        }
-                    });
-                    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
-                    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-                    Object.defineProperty(navigator, 'connection', {
-                        get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false })
-                    });
-                    const origQuery = window.navigator.permissions.query.bind(navigator.permissions);
-                    navigator.permissions.query = (params) => {
-                        if (params.name === 'notifications') {
-                            return Promise.resolve({ state: Notification.permission });
-                        }
-                        return origQuery(params);
-                    };
-                    if (!window.chrome) {
-                        window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
-                    }
-                    if (window.outerWidth === 0) window.outerWidth = window.innerWidth;
-                    if (window.outerHeight === 0) window.outerHeight = window.innerHeight;
-                """)
-
-                # Suggestion 1: capture response headers for client hint replay
-                def on_response(response):
-                    if response.url == url or response.url.rstrip("/") == url.rstrip("/"):
-                        try:
-                            captured_response_headers.update(response.headers)
-                        except Exception:
-                            pass
-
-                page.on("response", on_response)
-
-                # Do NOT block stylesheets — hostile sites behave differently without them
-                def route_filter(route):
-                    if route.request.resource_type in ("image", "media", "font"):
-                        return route.abort()
-                    return route.continue_()
-
-                page.route("**/*", route_filter)
-
-                resp = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                status = resp.status if resp else 0
-
-                if domain in HOSTILE_DOMAINS:
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=min(4000, timeout_ms))
-                    except Exception:
-                        pass
-                    for sel in CONSENT_SELECTORS.get(domain, []):
-                        try:
-                            btn = page.locator(sel).first
-                            if btn and btn.is_visible():
-                                btn.click(timeout=1200)
-                                break
-                        except Exception:
-                            continue
-                    time.sleep(random.uniform(0.2, 0.9))
-                    try:
-                        page.mouse.wheel(0, random.randint(400, 900))
-                    except Exception:
-                        pass
-                    try:
-                        vw = ident["viewport"]["width"]
-                        vh = ident["viewport"]["height"]
-                        x = random.randint(int(vw * 0.2), int(vw * 0.8))
-                        y = random.randint(int(vh * 0.2), int(vh * 0.8))
-                        page.mouse.move(x, y, steps=random.randint(8, 16))
-                    except Exception:
-                        pass
-
-                html = page.content() or ""
-                final_url = page.url
-
-                if captured_response_headers:
-                    capture_client_hints(domain, captured_response_headers)
-
-                try:
-                    with open(state_file, 'w') as f:
-                        json.dump(context.storage_state(), f)
-                except Exception:
-                    pass
-
-                return status, final_url, html
-
-            except Exception as e:
-                print(f"  Playwright error on {url}: {str(e)[:120]}")
-                return 0, url, ""
-            finally:
-                try:
-                    if browser:
-                        browser.close()
-                except Exception:
-                    pass
-
-
-def fetch_html(
-    url: str,
-    headers: dict,
-    timeout_s: int,
-    use_proxy: bool,
-    domain: str,
-    strategy: str = "requests",
-    previous_state: dict | None = None,
-    is_verification: bool = False,
-):
-    """
-    Strategy-aware router.
-    Hostile domains: requests-first unless strategy has been escalated to playwright.
-    """
-    timeout_s = min(timeout_s, MAX_TIMEOUT)
-    previous_state = previous_state or {}
-    is_hostile = domain in HOSTILE_DOMAINS
-    # Hard override: some sites blackhole requests; use Playwright always.
-    if domain in FORCE_PLAYWRIGHT_DOMAINS and PLAYWRIGHT_AVAILABLE:
-        return fetch_html_playwright(
-            url,
-            timeout_ms=timeout_s * 1000,
-            use_proxy=use_proxy,
-            domain=domain
-        )
-
-    justified_playwright = (
-        strategy == "playwright"
-        or (domain in FORCE_PLAYWRIGHT_DOMAINS and not is_hostile)
-    )
-
-    if is_hostile and PLAYWRIGHT_AVAILABLE:
-        prev_in_stock = bool(previous_state.get("in_stock"))
-        if strategy != "playwright" and not (prev_in_stock and not is_verification):
-            justified_playwright = False
-
-    if justified_playwright and PLAYWRIGHT_AVAILABLE:
-        return fetch_html_playwright(url, timeout_ms=timeout_s * 1000, use_proxy=use_proxy, domain=domain)
-
-    return fetch_html_requests(url, headers, timeout_s, use_proxy, domain)
-
-
-# =========================================================
-#  DATABASE
-# =========================================================
-def init_db_pool():
-    global DB_POOL
-    print(f"  Checking database connection...")
-    if not DATABASE_URL:
-        print("  DATABASE_URL not found! Database disabled.")
-        return False
-    if DB_POOL is None:
-        try:
-            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL, connect_timeout=10)
-            print("  Database pool initialized")
-            return True
-        except Exception as e:
-            print(f"  Failed to create pool: {e}")
-            return False
-    return True
-
-
-def get_db_connection():
-    global DB_POOL
-    if DB_POOL:
-        return DB_POOL.getconn()
-    return psycopg2.connect(DATABASE_URL)
-
-
-def return_db_connection(conn):
-    global DB_POOL
-    if DB_POOL and conn:
-        DB_POOL.putconn(conn)
-    elif conn:
-        conn.close()
-
-
-def init_database():
-    if not DATABASE_URL:
-        return False
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS product_state (
-                store_url TEXT NOT NULL,
-                product_url TEXT NOT NULL,
-                product_name TEXT,
-                in_stock BOOLEAN DEFAULT TRUE,
-                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_alerted TIMESTAMP,
-                PRIMARY KEY (store_url, product_url)
-            )
-        """)
-        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_alerted TIMESTAMP")
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ping_state (
-                ping_type TEXT PRIMARY KEY,
-                last_ping TEXT
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS monitored_urls (
-                url TEXT NOT NULL,
-                file_group TEXT NOT NULL,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (url, file_group)
-            )
-        """)
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-        print("  Database initialized")
-        return True
-    except Exception as e:
-        print(f"  Database error: {e}")
-        if conn:
-            return_db_connection(conn)
-        return False
-
-
-def load_ping_state():
-    global LAST_HOURLY_PING, LAST_DAILY_PING
-    if not DATABASE_URL:
-        print("  Skipping ping state load (no DATABASE_URL).")
-        return
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT ping_type, last_ping FROM ping_state")
-        rows = cur.fetchall()
-        for ping_type, last_ping in rows:
-            if ping_type == "hourly":
-                LAST_HOURLY_PING = last_ping
-            elif ping_type == "daily":
-                LAST_DAILY_PING = last_ping
-        cur.close()
-        return_db_connection(conn)
-        if LAST_HOURLY_PING or LAST_DAILY_PING:
-            print(f"  Loaded ping state: hourly={LAST_HOURLY_PING}, daily={LAST_DAILY_PING}")
-    except Exception as e:
-        print(f"  Error loading ping state: {e}")
-        if conn:
-            return_db_connection(conn)
-
-
-def save_ping_state(ping_type, value):
-    if not DATABASE_URL:
-        return
-    for attempt in range(3):
-        conn = None
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO ping_state (ping_type, last_ping)
-                VALUES (%s, %s)
-                ON CONFLICT (ping_type) DO UPDATE SET last_ping = EXCLUDED.last_ping
-            """, (ping_type, value))
-            conn.commit()
-            cur.close()
-            return_db_connection(conn)
-            return
-        except Exception as e:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            if attempt < 2:
-                time.sleep(1)
-                init_db_pool()
-            else:
-                print(f"  Error saving ping state: {e}")
-
-
-def sync_urls_to_db():
-    if not DATABASE_URL:
-        return
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        total_added = 0
-        total_removed = 0
-        for franchise in FRANCHISES:
-            for file_path in franchise.get("direct_files", []):
-                file_urls = set()
-                try:
-                    with open(file_path, "r") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and line.startswith("http"):
-                                file_urls.add(line.split()[0])
-                except FileNotFoundError:
-                    continue
-                cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
-                db_urls = set(row[0] for row in cur.fetchall())
-                new_urls = file_urls - db_urls
-                removed_urls = db_urls - file_urls
-                for url in new_urls:
-                    cur.execute(
-                        "INSERT INTO monitored_urls (url, file_group) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                        (url, file_path)
-                    )
-                    total_added += 1
-                for url in removed_urls:
-                    cur.execute("DELETE FROM monitored_urls WHERE url = %s AND file_group = %s", (url, file_path))
-                    total_removed += 1
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-        if total_added > 0 or total_removed > 0:
-            print(f"  URL sync: {total_added} added, {total_removed} removed")
-        else:
-            print(f"  URL sync: all up to date")
-    except Exception as e:
-        print(f"  URL sync error: {e}")
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            return_db_connection(conn)
-
-
-def load_urls(file_list):
-    all_urls = set()
-    for file_path in file_list:
-        try:
-            with open(file_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and line.startswith("http"):
-                        all_urls.add(line.split()[0])
-        except FileNotFoundError:
-            print(f"  File not found: {file_path}")
-    return list(all_urls)
-
-
-def load_urls_from_db(file_path):
-    if not DATABASE_URL:
-        return load_urls([file_path])
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
-        urls = [row[0] for row in cur.fetchall()]
-        cur.close()
-        return_db_connection(conn)
-        return urls
-    except Exception as e:
-        print(f"  DB URL load error, falling back to file: {e}")
-        if conn:
-            return_db_connection(conn)
-        return load_urls([file_path])
-
-
-def load_direct_state():
-    direct_state = {}
-    if not DATABASE_URL:
-        return direct_state
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT product_url, product_name, in_stock, last_alerted FROM product_state WHERE store_url = product_url")
-        rows = cur.fetchall()
-        for url, name, in_stock, last_alerted in rows:
-            direct_state[url] = {
-                "name": name or "",
-                "in_stock": in_stock,
-                "stock_status": "unknown",
-                "last_alerted": last_alerted
-            }
-        cur.close()
-        return_db_connection(conn)
-        print(f"  Loaded {len(rows)} direct products from DB")
-    except Exception as e:
-        print(f"  Error loading direct state: {e}")
-        if conn:
-            return_db_connection(conn)
-    return direct_state
-
-
-def save_product(product_url, product_name, in_stock, retry=True):
-    if not DATABASE_URL:
-        return
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO product_state (store_url, product_url, product_name, in_stock, last_seen)
-            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-            ON CONFLICT (store_url, product_url)
-            DO UPDATE SET product_name = EXCLUDED.product_name,
-                          in_stock = EXCLUDED.in_stock,
-                          last_seen = CURRENT_TIMESTAMP
-        """, (product_url, product_url, product_name, in_stock))
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-    except Exception as e:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-        if retry and "SSL" in str(e):
-            time.sleep(1)
-            save_product(product_url, product_name, in_stock, retry=False)
-        else:
-            print(f"  Error saving product: {e}")
-
-
-def mark_alerted(product_url):
-    if not DATABASE_URL:
-        return
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE product_state
-            SET last_alerted = CURRENT_TIMESTAMP
-            WHERE product_url = %s
-        """, (product_url,))
-        conn.commit()
-        cur.close()
-        return_db_connection(conn)
-    except Exception as e:
-        print(f"  Error marking alerted: {e}")
-        if conn:
-            return_db_connection(conn)
+FAILED_SITES = {}  # {url: failure_time}
+FAILURE_COOLDOWN_MINUTES = 3
 
 
 # =========================================================
@@ -1172,6 +270,7 @@ HOURLY_STATS = {}
 DAILY_STATS = {}
 TOTAL_SCANS = 0
 DAILY_SCANS = 0
+HOURLY_FAILED_DETAILS = []
 
 
 # =========================================================
@@ -1179,12 +278,12 @@ DAILY_SCANS = 0
 # =========================================================
 JS_SKIP_CACHE = {}
 JS_SKIP_MINUTES = 5
+
 VERIFIED_OUT_CACHE = set()
+
 JS_URL_PATTERNS = ['#/', 'dffullscreen', '?view=ajax', 'doofinder']
-JS_PAGE_INDICATORS = [
-    'enable javascript', 'javascript is required', 'doofinder',
-    'please enable javascript', 'browser does not support'
-]
+JS_PAGE_INDICATORS = ['enable javascript', 'javascript is required', 'doofinder',
+                      'please enable javascript', 'browser does not support']
 
 
 # =========================================================
@@ -1238,6 +337,500 @@ def is_store_unavailable(text: str) -> bool:
 
 
 # =========================================================
+#  FETCH WRAPPERS
+# =========================================================
+BLOCKED_MARKERS = ["robot", "captcha", "blocked", "forbidden", "access denied", "cloudflare", "sorry, you have been blocked"]
+
+DOMAIN_HEALTH = {}  # per domain health
+
+DOMAIN_COOKIES_DIR = 'cookies'
+os.makedirs(DOMAIN_COOKIES_DIR, exist_ok=True)
+
+STATE_DIR = 'states'
+os.makedirs(STATE_DIR, exist_ok=True)
+
+def get_session_for_domain(domain: str):
+    if domain not in DOMAIN_SESSIONS:
+        DOMAIN_SESSIONS[domain] = requests.Session()
+        DOMAIN_SESSIONS[domain].mount("http://", adapter)
+        DOMAIN_SESSIONS[domain].mount("https://", adapter)
+        cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
+        if os.path.exists(cookie_file):
+            try:
+                with open(cookie_file, 'r') as f:
+                    cookies = json.load(f)
+                for cookie in cookies:
+                    DOMAIN_SESSIONS[domain].cookies.set(**cookie)
+            except:
+                pass
+    return DOMAIN_SESSIONS[domain]
+
+
+def save_cookies_for_domain(domain: str, session):
+    cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
+    cookies = [c.get_dict() for c in session.cookies]
+    with open(cookie_file, 'w') as f:
+        json.dump(cookies, f)
+
+
+def clear_cookies_for_domain(domain: str):
+    cookie_file = os.path.join(DOMAIN_COOKIES_DIR, f"{domain}.json")
+    if os.path.exists(cookie_file):
+        os.remove(cookie_file)
+    state_file = os.path.join(STATE_DIR, f"{domain}.json")
+    if os.path.exists(state_file):
+        os.remove(state_file)
+    if domain in DOMAIN_SESSIONS:
+        DOMAIN_SESSIONS[domain].cookies.clear()
+
+
+def fetch_html_requests(url: str, headers: dict, timeout_s: int, use_proxy: bool, domain: str):
+    session = get_session_for_domain(domain)
+    proxies = proxies_for_url(url) if use_proxy else None
+    r = session.get(
+        url,
+        headers=headers,
+        timeout=timeout_s,
+        proxies=proxies,
+    )
+    return r.status_code, r.url, r.text
+
+
+def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: str):
+    if not PLAYWRIGHT_AVAILABLE:
+        return 0, url, ""
+
+    proxy_cfg = playwright_proxy_for_url(url) if use_proxy else None
+
+    state_file = os.path.join(STATE_DIR, f"{domain}.json")
+    storage_state = None
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, 'r') as f:
+                storage_state = json.load(f)
+        except:
+            pass
+
+    with sync_playwright() as p:
+        launch_kwargs = {
+            "headless": True,
+            "args": [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-http2",
+                "--disable-quic",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+                "--disable-infobars",
+                "--window-size=1920,1080",
+            ],
+        }
+        if proxy_cfg:
+            launch_kwargs["proxy"] = proxy_cfg
+
+        context_kwargs = {
+            "user_agent": random.choice(REAL_UAS),
+            "viewport": {"width": 1920, "height": 1080},
+            "java_script_enabled": True,
+            "locale": "en-GB",
+            "timezone_id": "Europe/London",
+            "bypass_csp": True,
+            "storage_state": storage_state,
+        }
+
+        browser = None
+        try:
+            browser = p.chromium.launch(**launch_kwargs)
+            context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+
+            # Apply full stealth suite — this is the key upgrade
+            stealth_sync(page)
+
+            # Auto-accept consent banners (OneTrust common on UK retail)
+            consent_selectors = [
+                "#onetrust-accept-btn-handler",
+                "button:has-text('Accept all')",
+                "button:has-text('Accept All')",
+                "button:has-text('Accept')",
+                "[aria-label*='accept']",
+            ]
+            for sel in consent_selectors:
+                try:
+                    btn = page.locator(sel).first
+                    if btn.is_visible(timeout=3000):
+                        btn.click(timeout=5000)
+                        print(f"  Clicked consent button on {domain}")
+                        time.sleep(1.5)
+                        break
+                except:
+                    continue
+
+            # Keep your resource blocking (optional but good for speed)
+            def route_filter(route):
+                rt = route.request.resource_type
+                if rt in ("image", "media", "font"):
+                    return route.abort()
+                return route.continue_()
+
+            page.route("**/*", route_filter)
+
+            # Human-like startup behavior
+            page.evaluate("() => window.scrollTo(0, 150)")
+            time.sleep(random.uniform(0.4, 1.1))
+
+            # Goto with shorter timeout to avoid hanging forever
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=20000)  # 20 seconds max
+            status = resp.status if resp else 0
+            html = page.content() or ""
+            final_url = page.url
+
+            # Save storage state
+            try:
+                with open(state_file, 'w') as f:
+                    json.dump(context.storage_state(), f)
+            except Exception:
+                pass
+
+            return status, final_url, html
+
+        except Exception as e:
+            print(f" Playwright error on {url}: {str(e)[:120]}")
+            return 0, url, ""
+        finally:
+            if browser:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+
+
+def fetch_html(url: str, headers: dict, timeout_s: int, use_proxy: bool, domain: str):
+    timeout_s = min(timeout_s, MAX_TIMEOUT)
+    if should_use_playwright(url) and PLAYWRIGHT_AVAILABLE:
+        return fetch_html_playwright(url, timeout_ms=timeout_s * 1000, use_proxy=use_proxy, domain=domain)
+    return fetch_html_requests(url, headers=headers, timeout_s=timeout_s, use_proxy=use_proxy, domain=domain)
+
+
+# =========================================================
+#  DATABASE
+# =========================================================
+DB_LOCK = threading.Lock()
+
+
+def init_db_pool():
+    global DB_POOL
+    print(f" Checking database connection...")
+    if not DATABASE_URL:
+        print(" DATABASE_URL not found! Database disabled.")
+        return False
+    if DB_POOL is None:
+        try:
+            DB_POOL = pool.SimpleConnectionPool(1, 10, DATABASE_URL, connect_timeout=10)
+            print(" Database pool initialized")
+            return True
+        except Exception as e:
+            print(f" Failed to create pool: {e}")
+            return False
+    return True
+
+
+def get_db_connection():
+    global DB_POOL
+    if DB_POOL:
+        return DB_POOL.getconn()
+    return psycopg2.connect(DATABASE_URL)
+
+
+def return_db_connection(conn):
+    global DB_POOL
+    if DB_POOL and conn:
+        DB_POOL.putconn(conn)
+    elif conn:
+        conn.close()
+
+
+def init_database():
+    if not DATABASE_URL:
+        return False
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS product_state (
+                store_url TEXT NOT NULL,
+                product_url TEXT NOT NULL,
+                product_name TEXT,
+                in_stock BOOLEAN DEFAULT TRUE,
+                stock_status TEXT,
+                last_checked TIMESTAMP,
+                last_error TEXT,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_alerted TIMESTAMP,
+                PRIMARY KEY (store_url, product_url)
+            )
+        """)
+        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_alerted TIMESTAMP")
+        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS stock_status TEXT")
+        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_checked TIMESTAMP")
+        cur.execute("ALTER TABLE product_state ADD COLUMN IF NOT EXISTS last_error TEXT")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ping_state (
+                ping_type TEXT PRIMARY KEY,
+                last_ping TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS monitored_urls (
+                url TEXT NOT NULL,
+                file_group TEXT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (url, file_group)
+            )
+        """)
+        conn.commit()
+        cur.close()
+        return_db_connection(conn)
+        print(" Database initialized")
+        return True
+    except Exception as e:
+        print(f" Database error: {e}")
+        if conn:
+            return_db_connection(conn)
+        return False
+
+
+def load_ping_state():
+    global LAST_HOURLY_PING, LAST_DAILY_PING
+    if not DATABASE_URL:
+        print(" Skipping ping state load (no DATABASE_URL).")
+        return
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT ping_type, last_ping FROM ping_state")
+        rows = cur.fetchall()
+        for ping_type, last_ping in rows:
+            if ping_type == "hourly":
+                LAST_HOURLY_PING = last_ping
+            elif ping_type == "daily":
+                LAST_DAILY_PING = last_ping
+        cur.close()
+        return_db_connection(conn)
+        if LAST_HOURLY_PING or LAST_DAILY_PING:
+            print(f" Loaded ping state: hourly={LAST_HOURLY_PING}, daily={LAST_DAILY_PING}")
+    except Exception as e:
+        print(f" Error loading ping state: {e}")
+        if conn:
+            return_db_connection(conn)
+
+
+def save_ping_state(ping_type, value):
+    if not DATABASE_URL:
+        return
+    for attempt in range(3):
+        conn = None
+        try:
+            with DB_LOCK:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO ping_state (ping_type, last_ping)
+                    VALUES (%s, %s)
+                    ON CONFLICT (ping_type) DO UPDATE SET last_ping = EXCLUDED.last_ping
+                """, (ping_type, value))
+                conn.commit()
+                cur.close()
+                return_db_connection(conn)
+            return
+        except Exception as e:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+            if attempt < 2:
+                time.sleep(1)
+                init_db_pool()
+            else:
+                print(f" Error saving ping state: {e}")
+
+
+def sync_urls_to_db():
+    if not DATABASE_URL:
+        return
+    conn = None
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            total_added = 0
+            total_removed = 0
+            for franchise in FRANCHISES:
+                for file_path in franchise.get("direct_files", []):
+                    file_urls = set()
+                    try:
+                        with open(file_path, "r") as f:
+                            for line in f:
+                                line = line.strip()
+                                if line and line.startswith("http"):
+                                    file_urls.add(line.split()[0])
+                    except FileNotFoundError:
+                        continue
+                    cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
+                    db_urls = set(row[0] for row in cur.fetchall())
+                    new_urls = file_urls - db_urls
+                    removed_urls = db_urls - file_urls
+                    for url in new_urls:
+                        cur.execute(
+                            "INSERT INTO monitored_urls (url, file_group) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                            (url, file_path)
+                        )
+                        total_added += 1
+                    for url in removed_urls:
+                        cur.execute("DELETE FROM monitored_urls WHERE url = %s AND file_group = %s", (url, file_path))
+                        total_removed += 1
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+        if total_added > 0 or total_removed > 0:
+            print(f" URL sync: {total_added} added, {total_removed} removed")
+        else:
+            print(f" URL sync: all up to date")
+    except Exception as e:
+        print(f" URL sync error: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+            return_db_connection(conn)
+
+
+def load_urls(file_list):
+    all_urls = set()
+    for file_path in file_list:
+        try:
+            with open(file_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and line.startswith("http"):
+                        all_urls.add(line.split()[0])
+        except FileNotFoundError:
+            print(f" File not found: {file_path}")
+    return list(all_urls)
+
+
+def load_urls_from_db(file_path):
+    if not DATABASE_URL:
+        return load_urls([file_path])
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT url FROM monitored_urls WHERE file_group = %s", (file_path,))
+        urls = [row[0] for row in cur.fetchall()]
+        cur.close()
+        return_db_connection(conn)
+        return urls
+    except Exception as e:
+        print(f" DB URL load error, falling back to file: {e}")
+        if conn:
+            return_db_connection(conn)
+        return load_urls([file_path])
+
+
+def load_direct_state():
+    direct_state = {}
+    if not DATABASE_URL:
+        return direct_state
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT product_url, product_name, in_stock, stock_status, last_alerted, last_error, last_checked FROM product_state WHERE store_url = product_url")
+        rows = cur.fetchall()
+        for url, name, in_stock, stock_status, last_alerted, last_error, last_checked in rows:
+            direct_state[url] = {
+                "name": name or "",
+                "in_stock": in_stock,
+                "stock_status": stock_status or "unknown",
+                "last_alerted": last_alerted,
+                "last_error": last_error,
+                "last_checked": last_checked
+            }
+        cur.close()
+        return_db_connection(conn)
+        print(f" Loaded {len(rows)} direct products from DB")
+    except Exception as e:
+        print(f" Error loading direct state: {e}")
+        if conn:
+            return_db_connection(conn)
+    return direct_state
+
+
+def save_product(product_url, product_name, in_stock, stock_status, last_checked, last_error=None, retry=True):
+    if not DATABASE_URL:
+        return
+    conn = None
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            update_in_stock = ", in_stock = EXCLUDED.in_stock" if stock_status != "unknown" else ""
+            cur.execute("""
+                INSERT INTO product_state (store_url, product_url, product_name, in_stock, stock_status, last_checked, last_error, last_seen)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (store_url, product_url)
+                DO UPDATE SET product_name = EXCLUDED.product_name,
+                              stock_status = EXCLUDED.stock_status,
+                              last_checked = EXCLUDED.last_checked,
+                              last_error = EXCLUDED.last_error,
+                              last_seen = CURRENT_TIMESTAMP
+                              """ + update_in_stock + """
+            """, (product_url, product_url, product_name, in_stock, stock_status, last_checked, last_error))
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+    except Exception as e:
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
+        if retry and "SSL" in str(e):
+            time.sleep(1)
+            save_product(product_url, product_name, in_stock, stock_status, last_checked, last_error, retry=False)
+        else:
+            print(f" Error saving product: {e}")
+
+
+def mark_alerted(product_url):
+    if not DATABASE_URL:
+        return
+    conn = None
+    try:
+        with DB_LOCK:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE product_state
+                SET last_alerted = CURRENT_TIMESTAMP
+                WHERE product_url = %s
+            """, (product_url,))
+            conn.commit()
+            cur.close()
+            return_db_connection(conn)
+    except Exception as e:
+        print(f" Error marking alerted: {e}")
+        if conn:
+            return_db_connection(conn)
+
+
+# =========================================================
 #  STOCK CLASSIFICATION
 # =========================================================
 PREORDER_TERMS = [
@@ -1268,10 +861,10 @@ ADD_TO_CART_BUTTON_TERMS = [
     "add to shopping cart", "purchase now", "get it now"
 ]
 
-PREORDER_PATTERN = re.compile('|'.join(re.escape(t) for t in PREORDER_TERMS), re.IGNORECASE)
-OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(t) for t in OUT_OF_STOCK_TERMS), re.IGNORECASE)
-IN_STOCK_TEXT_PATTERN = re.compile('|'.join(re.escape(t) for t in IN_STOCK_TEXT_TERMS), re.IGNORECASE)
-ADD_TO_CART_PATTERN = re.compile('|'.join(re.escape(t) for t in ADD_TO_CART_BUTTON_TERMS), re.IGNORECASE)
+PREORDER_PATTERN = re.compile('|'.join(re.escape(term) for term in PREORDER_TERMS), re.IGNORECASE)
+OUT_OF_STOCK_PATTERN = re.compile('|'.join(re.escape(term) for term in OUT_OF_STOCK_TERMS), re.IGNORECASE)
+IN_STOCK_TEXT_PATTERN = re.compile('|'.join(re.escape(term) for term in IN_STOCK_TEXT_TERMS), re.IGNORECASE)
+ADD_TO_CART_PATTERN = re.compile('|'.join(re.escape(term) for term in ADD_TO_CART_BUTTON_TERMS), re.IGNORECASE)
 
 
 def is_element_hidden(element):
@@ -1308,6 +901,7 @@ def find_main_product_area(soup):
     wix_product = soup.find(attrs={'data-hook': 'product-page'})
     if wix_product:
         return wix_product
+
     main_selectors = [
         'product-essential', 'product-main', 'product-info-main',
         'product-details-wrapper', 'product-single', 'pdp-main',
@@ -1323,6 +917,7 @@ def find_main_product_area(soup):
 def classify_stock_with_soup(soup, page_text, raw_html):
     text_lower = page_text.lower()
     main_area = find_main_product_area(soup)
+
     if main_area:
         main_text = main_area.get_text().lower()
         if OUT_OF_STOCK_PATTERN.search(main_text):
@@ -1334,56 +929,65 @@ def classify_stock_with_soup(soup, page_text, raw_html):
         if PREORDER_PATTERN.search(main_text):
             return "preorder"
         return "out"
+
     if OUT_OF_STOCK_PATTERN.search(text_lower):
         return "out"
+
     if has_active_add_to_cart_button(soup):
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
+
     if IN_STOCK_TEXT_PATTERN.search(text_lower):
         if PREORDER_PATTERN.search(text_lower):
             return "preorder"
         return "in"
+
     if PREORDER_PATTERN.search(text_lower):
         return "preorder"
+
     return "out"
 
 
 # =========================================================
 #  SKIP/FAIL HELPERS
 # =========================================================
-FAILED_SITES = {}
-FAILURE_COOLDOWN_MINUTES = 3
-
-
 def is_site_in_failure_cooldown(url):
     if url not in FAILED_SITES:
         return False
-    if datetime.now() - FAILED_SITES[url] < timedelta(minutes=FAILURE_COOLDOWN_MINUTES):
+    failure_time = FAILED_SITES[url]
+    if datetime.now(timezone.utc) - failure_time < timedelta(minutes=FAILURE_COOLDOWN_MINUTES):
         return True
     del FAILED_SITES[url]
     return False
 
 
 def mark_site_failed(url):
-    FAILED_SITES[url] = datetime.now()
+    FAILED_SITES[url] = datetime.now(timezone.utc)
 
 
 def is_js_only_url(url):
     return any(pattern in url.lower() for pattern in JS_URL_PATTERNS)
 
 
+def is_js_only_page(html_content, product_count):
+    if len(html_content) < 2000 and product_count < 3:
+        return True
+    html_lower = html_content.lower()
+    return any(indicator in html_lower for indicator in JS_PAGE_INDICATORS)
+
+
 def is_in_js_skip_cache(url):
     if url not in JS_SKIP_CACHE:
         return False
-    if datetime.now() < JS_SKIP_CACHE[url]:
+    if datetime.now(timezone.utc) < JS_SKIP_CACHE[url]:
         return True
     del JS_SKIP_CACHE[url]
     return False
 
 
 def add_to_js_skip_cache(url):
-    JS_SKIP_CACHE[url] = datetime.now() + timedelta(minutes=JS_SKIP_MINUTES)
+    JS_SKIP_CACHE[url] = datetime.now(timezone.utc) + timedelta(minutes=JS_SKIP_MINUTES)
 
 
 # =========================================================
@@ -1394,10 +998,10 @@ def should_alert(last_alerted):
 
 
 # =========================================================
-#  SEND ALERT (Fix 3: return True/False and only mark alerted after success)
+#  SEND ALERT
 # =========================================================
 def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
-               image_url=None, price=None, store_file=None) -> bool:
+               image_url=None, price=None, store_file=None):
     webhook_url = None
     role_id = None
 
@@ -1412,8 +1016,8 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
         webhook_url = CURRENT_WEBHOOK
 
     if webhook_url is None:
-        print("  Warning: No webhook for this file/group")
-        return False
+        print(" Warning: No webhook for this file/group")
+        return
 
     if is_preorder:
         title = f"PREORDER AVAILABLE - {product_name}"
@@ -1459,14 +1063,11 @@ def send_alert(product_name, url, store_name, is_preorder=False, is_new=False,
     try:
         r = SESSION.post(webhook_url, json=data, timeout=10)
         if r.status_code == 204:
-            print(f"  Alert sent to {store_file or 'default'}!")
-            return True
+            print(f" Alert sent to {store_file or 'default'}!")
         else:
-            print(f"  Failed to send alert ({r.status_code}): {r.text[:200]}")
-            return False
+            print(f" Failed to send alert ({r.status_code}): {r.text[:200]}")
     except Exception as e:
-        print(f"  Discord error: {e}")
-        return False
+        print(f" Discord error: {e}")
 
 
 # =========================================================
@@ -1480,125 +1081,74 @@ def get_timeout_for_url(url):
 
 
 # =========================================================
-#  UNKNOWN STATE HELPER (change 1)
-# =========================================================
-def unknown_state(previous_state, now_utc, reason, url=None):
-    """
-    Always return a well-formed state on any failure path.
-    Preserves previous in_stock/name/image/price so the DB is never
-    clobbered by a transient error.
-    """
-    prev = previous_state or {}
-    return {
-        "name": prev.get("name"),
-        "in_stock": bool(prev.get("in_stock", False)),
-        "stock_status": "unknown",
-        "last_alerted": prev.get("last_alerted"),
-        "image_url": prev.get("image_url"),
-        "price": prev.get("price"),
-        "last_checked": now_utc,
-        "last_error": reason[:120] if reason else None,
-    }
-
-
-# =========================================================
 #  DIRECT PRODUCT CHECK
 # =========================================================
 def check_direct_product(url, previous_state, stats, store_file=None, is_verification=False, is_dormant=False):
-    domain = _host_for_url(url)
-    file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
-    now_utc = datetime.now(timezone.utc)
+    if is_site_in_failure_cooldown(url):
+        print(f" SKIPPED (failed recently)")
+        if not is_verification:
+            stats['skipped'] += 1
+        return previous_state, None
 
-    # Change 1A: guard unparseable URL — return unknown_state, not None
-    if not domain:
-        print(f"  UNKNOWN (could not parse domain from URL: {url[:80]})")
+    domain = _host_for_url(url)
+    health = DOMAIN_HEALTH.get(domain, {
+        'strategy': 'playwright' if domain in PLAYWRIGHT_DOMAINS else 'requests',
+        'use_proxy': domain in DECODO_BLOCKED_DOMAINS,
+        'cooldown_until': None,
+        'history': [],
+        'success_rate': 1.0,
+        'failure_streak': 0,
+        'last_success': None,
+        'latency': []
+    })
+    DOMAIN_HEALTH[domain] = health
+
+    if health['cooldown_until'] and datetime.now(timezone.utc) < health['cooldown_until']:
+        print(f" UNKNOWN (cooldown)")
         if not is_verification:
             stats['failed'] += 1
-        return unknown_state(previous_state, now_utc, "bad_domain_parse"), None
-
-    # Change 1B: URL failure cooldown — return unknown_state
-    if is_site_in_failure_cooldown(url):
-        print(f"  SKIPPED (failed recently)")
-        if not is_verification:
-            stats['skipped'] += 1
-        return unknown_state(previous_state, now_utc, "url_cooldown"), None
-
-    # Initialise per-domain health tracking (single-threaded loop: lock only for init)
-    with DOMAIN_HEALTH_LOCK:
-        health = DOMAIN_HEALTH.setdefault(domain, {
-            "strategy": ("playwright" if domain in FORCE_PLAYWRIGHT_DOMAINS else "requests"),
-            "use_proxy": (
-                domain in PROXY_REQUIRED_DOMAINS and domain not in PROXY_BANNED_DOMAINS
-            ),
-            "cooldown_until": None,
-            "history": [],
-            "success_rate": 1.0,
-            "failure_streak": 0,
-            "last_success": None,
-            "latency": [],
-        })
-
-    # Change 1C: domain cooldown — return unknown_state
-    if health['cooldown_until'] and now_utc < health['cooldown_until']:
-        print(f"  UNKNOWN (domain cooldown)")
-        if not is_verification:
-            stats['skipped'] += 1
-            with HOURLY_FAILED_DETAILS_LOCK:
-                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Cooldown"})
-        return unknown_state(previous_state, now_utc, "domain_cooldown"), None
-
-    # Change 1D: soft throttle — return unknown_state
-    throttle, wait_s = should_soft_throttle(domain, now_utc)
-    if throttle and domain in HOSTILE_DOMAINS and not is_verification:
-        print(f"  SKIPPED (soft throttle {wait_s}s remaining)")
-        stats['skipped'] += 1
-        with HOURLY_FAILED_DETAILS_LOCK:
-            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"SoftThrottle({wait_s}s)"})
-        return unknown_state(previous_state, now_utc, f"soft_throttle_{wait_s}s"), None
+            file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
+            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Cooldown"})
+        return {
+            "name": previous_state.get("name") if previous_state else None,
+            "in_stock": previous_state.get("in_stock") if previous_state else False,
+            "stock_status": "unknown",
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+        }, None
 
     try:
         headers = get_headers_for_url(url)
-        timeout = get_timeout_for_url(url)
+        timeout_s = 15 if health['strategy'] == 'requests' else 20
         start_time = time.time()
 
-        sem = get_semaphore_for_domain(domain)
-        with sem:
-            # Change 5: mark_domain_hit only when we actually attempt (already correct — kept here)
-            if domain in HOSTILE_DOMAINS and not is_verification:
-                mark_domain_hit(domain, now_utc)
-
-            status_code, final_url, html = fetch_html(
-                url, headers, timeout,
-                health['use_proxy'],
-                domain,
-                strategy=health['strategy'],
-                previous_state=previous_state or {},
-                is_verification=is_verification,
-            )
+        status_code, final_url, html = fetch_html(url, headers, timeout_s, health['use_proxy'], domain)
 
         latency = time.time() - start_time
 
-        # Change 1E: HTTP failure — return unknown_state (dormant still returns OUT)
         if status_code != 200 or not html:
-            if is_dormant:
-                print(f"OUT - page removed ({status_code})")
-                return {
-                    "name": None, "in_stock": False, "stock_status": "out",
-                    "last_alerted": previous_state.get("last_alerted") if previous_state else None,
-                    "last_checked": now_utc, "last_error": None,
-                }, None
-            print(f"  Failed ({status_code})")
-            mark_site_failed(url)
-            if not is_verification:
-                stats['failed'] += 1
-                with HOURLY_FAILED_DETAILS_LOCK:
-                    HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": f"HTTP {status_code}"})
-            return unknown_state(previous_state, now_utc, f"http_{status_code}"), None
+            raise Exception(f"HTTP {status_code}")
 
         html_lower = html.lower()
         if any(marker in html_lower for marker in BLOCKED_MARKERS):
-            # Fix 2: don't clear cookies here — exception handler owns cookie purge + cooldown
+            clear_cookies_for_domain(domain)
             raise Exception("Blocked")
+
+        # Success
+        health['history'].append('success')
+        if len(health['history']) > 10:
+            health['history'].pop(0)
+        health['success_rate'] = health['history'].count('success') / len(health['history'])
+        health['failure_streak'] = 0
+        health['last_success'] = datetime.now(timezone.utc)
+        health['latency'].append(latency)
+        if len(health['latency']) > 10:
+            health['latency'].pop(0)
+
+        if health['strategy'] == 'requests':
+            save_cookies_for_domain(domain, get_session_for_domain(domain))
+        else:
+            state_file = os.path.join(STATE_DIR, f"{domain}.json")
+            # Storage state saved in fetch_html_playwright
 
         if is_dormant:
             original_path = urlparse(url).path.rstrip('/')
@@ -1607,36 +1157,25 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                 print(f"OUT - redirected")
                 return {
                     "name": None, "in_stock": False, "stock_status": "out",
-                    "last_alerted": previous_state.get("last_alerted") if previous_state else None,
-                    "last_checked": now_utc, "last_error": None,
+                    "last_alerted": previous_state.get("last_alerted") if previous_state else None
                 }, None
 
         if not is_verification:
             stats['fetched'] += 1
 
-        # Success — update health
-        if not is_verification:
-            health['history'].append('success')
-            if len(health['history']) > 10:
-                health['history'].pop(0)
-            health['success_rate'] = health['history'].count('success') / len(health['history'])
-            health['failure_streak'] = 0
-            health['last_success'] = now_utc
-            health['latency'].append(latency)
-            if len(health['latency']) > 10:
-                health['latency'].pop(0)
-
-        if health['strategy'] == 'requests':
-            save_cookies_for_domain(domain, get_session_for_domain(domain))
-
         soup = BeautifulSoup(html, "html.parser")
         page_text = soup.get_text()
+        raw_html = html
 
         if is_store_unavailable(page_text):
-            print("  UNKNOWN (store unavailable)")
-            return unknown_state(previous_state, now_utc, "store_unavailable"), None
+            print(" UNKNOWN (store unavailable)")
+            return {
+                "name": previous_state.get("name") if previous_state else None,
+                "in_stock": previous_state.get("in_stock") if previous_state else False,
+                "stock_status": "unknown",
+                "last_alerted": previous_state.get("last_alerted") if previous_state else None
+            }, None
 
-        # Product name
         product_name = None
         title_tag = soup.find('title')
         if title_tag:
@@ -1653,20 +1192,12 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                 "name": product_name,
                 "in_stock": False,
                 "stock_status": "out",
-                "last_alerted": previous_state.get("last_alerted") if previous_state else None,
-                "last_checked": now_utc,
-                "last_error": None,
+                "last_alerted": previous_state.get("last_alerted") if previous_state else None
             }, None
 
-        structured_available, structured_status = parse_stock_from_structured_data(html)
-        if structured_available is not None:
-            stock_status = structured_status
-            is_available = structured_available
-        else:
-            stock_status = classify_stock_with_soup(soup, page_text, html)
-            is_available = stock_status in ("in", "preorder")
+        stock_status = classify_stock_with_soup(soup, page_text, raw_html)
+        is_available = stock_status in ("in", "preorder")
 
-        # Image
         image_url = None
         img_selectors = [
             'img.product-featured-image', 'img.product-image', 'img.product__image',
@@ -1687,13 +1218,8 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
                         image_url = f"{parsed.scheme}://{parsed.netloc}{image_url}"
                     break
 
-        # Price
         price = None
-        price_selectors = [
-            '.price', '.product-price',
-            'meta[property="product:price:amount"]',
-            '[data-hook="formatted-primary-price"]'
-        ]
+        price_selectors = ['.price', '.product-price', 'meta[property="product:price:amount"]', '[data-hook="formatted-primary-price"]']
         for selector in price_selectors:
             elem = soup.select_one(selector)
             if elem:
@@ -1715,9 +1241,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
             "stock_status": stock_status,
             "last_alerted": previous_state.get("last_alerted") if previous_state else None,
             "image_url": image_url,
-            "price": price,
-            "last_checked": now_utc,
-            "last_error": None,
+            "price": price
         }
 
         change = None
@@ -1747,102 +1271,86 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         return current_state, change
 
     except requests.exceptions.Timeout:
+        health['history'].append('fail')
+        if len(health['history']) > 10:
+            health['history'].pop(0)
+        health['success_rate'] = health['history'].count('success') / len(health['history'])
+        health['failure_streak'] += 1
+        if health['failure_streak'] > 4:
+            health['cooldown_until'] = datetime.now(timezone.utc) + timedelta(minutes=10)
+        if health['success_rate'] < 0.5 and health['strategy'] == 'requests':
+            health['strategy'] = 'playwright'
+        if len(health['history']) >= 5 and health['history'][-5:].count('fail') > 3:
+            health['use_proxy'] = not health['use_proxy']
+        domain = urlparse(url).netloc
+        file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
         if is_dormant:
             print(f"OUT - timeout")
-            return {
-                "name": None, "in_stock": False, "stock_status": "out",
-                "last_alerted": previous_state.get("last_alerted") if previous_state else None,
-                "last_checked": now_utc, "last_error": None,
-            }, None
-
-        print(f"  TIMEOUT")
-        # Fix 3: don't poison URL cooldown on verification attempts
-        if not is_verification:
-            mark_site_failed(url)
+            return {"name": None, "in_stock": False, "stock_status": "out",
+                    "last_alerted": previous_state.get("last_alerted") if previous_state else None}, None
+        print(f" UNKNOWN (timeout)")
+        mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            with HOURLY_FAILED_DETAILS_LOCK:
-                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Timeout"})
-
-        if not is_verification:
-            health['history'].append('fail')
-            if len(health['history']) > 10:
-                health['history'].pop(0)
-            health['success_rate'] = health['history'].count('success') / len(health['history'])
-            health['failure_streak'] += 1
-            if len(health['history']) >= 6 and health['success_rate'] < 0.5 and health['strategy'] == 'requests':
-                health['strategy'] = 'playwright'
-                print(f"  Strategy switched to playwright for {domain} (low success rate)")
-            if health['failure_streak'] >= 5:
-                health['cooldown_until'] = now_utc + timedelta(minutes=10)
-                print(f"  Cooldown activated for {domain} (timeout streak >=5)")
-
-        return unknown_state(previous_state, now_utc, "timeout"), None
-
+            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": "Timeout"})
+        return {
+            "name": previous_state.get("name") if previous_state else None,
+            "in_stock": previous_state.get("in_stock") if previous_state else False,
+            "stock_status": "unknown",
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+        }, None
     except Exception as e:
-        e_str = str(e).lower()
-        is_blocked = any(kw in e_str for kw in ["blocked", "captcha", "forbidden"])
-
-        print(f"  Error: {str(e)[:80]}")
-
-        # Fix 3: don't poison URL cooldown on verification attempts
-        if not is_blocked and not is_verification:
-            mark_site_failed(url)
-
+        health['history'].append('fail')
+        if len(health['history']) > 10:
+            health['history'].pop(0)
+        health['success_rate'] = health['history'].count('success') / len(health['history'])
+        health['failure_streak'] += 1
+        if health['failure_streak'] > 4:
+            health['cooldown_until'] = datetime.now(timezone.utc) + timedelta(minutes=10)
+        if health['success_rate'] < 0.5 and health['strategy'] == 'requests':
+            health['strategy'] = 'playwright'
+        if len(health['history']) >= 5 and health['history'][-5:].count('fail') > 3:
+            health['use_proxy'] = not health['use_proxy']
+        domain = urlparse(url).netloc
+        file_label = store_file.split('/')[-1].replace('.txt', '') if store_file else "Unknown"
+        print(f" UNKNOWN ({str(e)[:80]})")
+        mark_site_failed(url)
         if not is_verification:
             stats['failed'] += 1
-            with HOURLY_FAILED_DETAILS_LOCK:
-                HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": str(e)[:80]})
-
-        if not is_verification:
-            health['history'].append('fail')
-            if len(health['history']) > 10:
-                health['history'].pop(0)
-            health['success_rate'] = health['history'].count('success') / len(health['history'])
-            health['failure_streak'] += 1
-
-            # Blocked/captcha — cookie purge + domain cooldown
-            if is_blocked:
-                clear_cookies_for_domain(domain)
-                health['cooldown_until'] = now_utc + timedelta(minutes=10)
-                print(f"  Immediate cooldown for {domain} (blocked/captcha/forbidden)")
-            elif health['failure_streak'] >= 5:
-                health['cooldown_until'] = now_utc + timedelta(minutes=10)
-                print(f"  Cooldown activated for {domain} (failure streak >=5)")
-
-            if len(health['history']) >= 6 and health['success_rate'] < 0.5 and health['strategy'] == 'requests':
-                health['strategy'] = 'playwright'
-                print(f"  Strategy switched to playwright for {domain} (low success rate)")
-
-        return unknown_state(previous_state, now_utc, str(e)), None
+            HOURLY_FAILED_DETAILS.append({"url": domain, "file": file_label, "reason": str(e)[:80]})
+        return {
+            "name": previous_state.get("name") if previous_state else None,
+            "in_stock": previous_state.get("in_stock") if previous_state else False,
+            "stock_status": "unknown",
+            "last_alerted": previous_state.get("last_alerted") if previous_state else None
+        }, None
 
 
 # =========================================================
-#  MAIN LOOP
+#  MAIN LOOP (this is your original flow)
 # =========================================================
 CHECK_INTERVAL = 5
 
+
 def main():
-    global CURRENT_FRANCHISE, CURRENT_WEBHOOK, CURRENT_ROLE_ID, USE_MOBILE_HEADERS
+    global CURRENT_WEBHOOK, CURRENT_ROLE_ID, USE_MOBILE_HEADERS
     global TOTAL_SCANS, DAILY_SCANS, LAST_HOURLY_PING, LAST_DAILY_PING
     global HOURLY_STATS, DAILY_STATS
 
-    print("  Starting Store Monitor Bot...")
+    print(" Starting Store Monitor Bot...")
     print(f"   Time: {datetime.now(timezone.utc)}")
     print(f"   Production mode: {IS_PRODUCTION}")
     print(f"   Franchises: {', '.join(f['name'] for f in FRANCHISES)}")
     print(f"   Playwright available: {PLAYWRIGHT_AVAILABLE}")
-    print(f"   curl_cffi available: {CURL_CFFI_AVAILABLE}")
-
     if PLAYWRIGHT_AVAILABLE:
-        print(f"   Force Playwright domains: {', '.join(sorted(FORCE_PLAYWRIGHT_DOMAINS))}")
+        print(f"   Playwright domains: {', '.join(sorted(PLAYWRIGHT_DOMAINS))}")
 
     db_ok = init_db_pool()
     if not db_ok:
-        print("  Database not configured. Continuing without database.")
+        print(" Database not configured. Continuing without database.")
     else:
         if not init_database():
-            print("  Database init failed. Continuing without database.")
+            print(" Database init failed. Continuing without database.")
             db_ok = False
 
     if db_ok:
@@ -1854,7 +1362,7 @@ def main():
 
     first_run = len(direct_state) == 0
     if first_run:
-        print("  First run - building initial database (no alerts)...")
+        print(" First run - building initial database (no alerts)...")
         for franchise in FRANCHISES:
             for fp in franchise.get("direct_files", []):
                 _ = load_urls_from_db(fp)
@@ -1865,9 +1373,8 @@ def main():
         print(f"   {franchise['name']}: {len(direct_files)} direct files, {webhook_groups} webhook groups")
 
     while True:
-        # Optional A: refresh daily-stable mobile flag at cycle start
-        USE_MOBILE_HEADERS = (int(datetime.now(ZoneInfo("Europe/London")).strftime("%d")) % 2 == 0)
-        header_type = "Mobile" if USE_MOBILE_HEADERS else "Desktop"
+        USE_MOBILE_HEADERS = not USE_MOBILE_HEADERS
+        header_type = " Mobile" if USE_MOBILE_HEADERS else " Desktop"
 
         if db_ok and not IS_PRODUCTION:
             sync_urls_to_db()
@@ -1877,13 +1384,14 @@ def main():
         total_stats = {'fetched': 0, 'failed': 0}
 
         for franchise in FRANCHISES:
+            global CURRENT_FRANCHISE, CURRENT_WEBHOOK, CURRENT_ROLE_ID
             CURRENT_FRANCHISE = franchise
             franchise_name = franchise["name"]
             CURRENT_WEBHOOK = None
             CURRENT_ROLE_ID = None
 
             print(f"\n{'='*50}")
-            print(f"  Scanning {franchise_name}...")
+            print(f" Scanning {franchise_name}...")
             print(f"{'='*50}")
 
             direct_files = franchise.get("direct_files", [])
@@ -1891,10 +1399,10 @@ def main():
                 print(f"   No direct files for {franchise_name}")
                 continue
 
-            stats = {'fetched': 0, 'failed': 0, 'skipped': 0}
+            stats = {'fetched': 0, 'failed': 0}
             franchise_changes = 0
-            dormant_files = franchise.get("dormant_files", [])
 
+            dormant_files = franchise.get("dormant_files", [])
             for file_path in direct_files:
                 file_name = file_path.split('/')[-1].replace('.txt', '')
                 file_urls = load_urls_from_db(file_path)
@@ -1915,103 +1423,83 @@ def main():
 
                 file_stats = {'fetched': 0, 'failed': 0, 'alerts': 0, 'skipped': 0}
                 dormant_label = " [DORMANT]" if is_dormant else ""
-                print(f"\n  {file_name}{dormant_label} ({len(file_urls)} products)")
+                print(f"\n {file_name}{dormant_label} ({len(file_urls)} products)")
+
+                requests_urls = []
+                pw_urls = []
 
                 for url in file_urls:
-                    domain = _host_for_url(url) or urlparse(url).netloc
-                    store_name = urlparse(url).netloc
-                    print(f"   Checking: {store_name}...", end=" ")
+                    domain = _host_for_url(url)
+                    health = DOMAIN_HEALTH.get(domain, {})
+                    if health.get('strategy', 'requests') == 'playwright':
+                        pw_urls.append((url, file_path, is_dormant))
+                    else:
+                        requests_urls.append((url, file_path, is_dormant))
 
-                    prev_state = direct_state.get(url)
-                    current_state, change = check_direct_product(
-                        url, prev_state, file_stats, store_file=file_path, is_dormant=is_dormant
-                    )
+                with ThreadPoolExecutor(max_workers=8) as requests_executor, ThreadPoolExecutor(max_workers=1) as pw_executor:
+                    futures = []
+                    for url, fp, dormant in requests_urls:
+                        prev = direct_state.get(url)
+                        futures.append(requests_executor.submit(check_direct_product, url, prev, file_stats, fp, False, dormant))
+                    for url, fp, dormant in pw_urls:
+                        prev = direct_state.get(url)
+                        futures.append(pw_executor.submit(check_direct_product, url, prev, file_stats, fp, False, dormant))
 
-                    if current_state:
-                        # Fix 1: DON'T commit to direct_state yet if there's a change to verify —
-                        # prevents "phantom IN" from overwriting good previous state before verify.
-
-                        if change and not first_run:
-                            print(f"  Potential {change.get('type', 'change')} - verifying...", end=" ")
-                            time.sleep(5)
-                            verified_state, _ = check_direct_product(
-                                url, prev_state, file_stats,
-                                store_file=file_path, is_verification=True, is_dormant=is_dormant
-                            )
-
-                            if verified_state and verified_state.get("stock_status") in ("in", "preorder"):
-                                verified_status = verified_state.get("stock_status")
-                                last_alerted = prev_state.get("last_alerted") if prev_state else None
-
-                                if not should_alert(last_alerted):
-                                    # No cooldown here (should_alert always True currently), but keep structure.
-                                    direct_state[url] = verified_state
-                                    print(f"  {'PREORDER' if verified_status == 'preorder' else 'IN STOCK'} (no alert)")
-                                else:
-                                    is_preorder = verified_status == "preorder"
-                                    print(f"  {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
-
-                                    img = verified_state.get("image_url") or change.get("image_url")
-                                    prc = verified_state.get("price") or change.get("price")
-
-                                    # Fix 3: only mark alerted after Discord succeeds
-                                    sent = send_alert(
-                                        change['name'], change["url"], store_name,
-                                        is_preorder=is_preorder, is_new=False,
-                                        image_url=img, price=prc,
-                                        store_file=file_path
-                                    )
-
-                                    if sent:
-                                        franchise_changes += 1
-                                        file_stats['alerts'] += 1
-
-                                        # Commit verified truth only after successful Discord send
-                                        direct_state[url] = verified_state
-                                        direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
-
-                                        # DB write + mark_alerted only after Discord success
-                                        save_product(url, verified_state.get("name") or current_state.get("name"), True)
-                                        mark_alerted(url)
-                                    else:
-                                        print("  Alert NOT sent (Discord error) — will retry on next detection")
-                                        # Do NOT commit verified in_stock / DB update, so it will trigger again next cycle.
-                                        # Keep a safe non-triggering state in memory
-                                        direct_state[url] = prev_state if prev_state is not None else current_state
-
-                            else:
-                                # Verification returned unknown or out — commit the non-triggering state
-                                direct_state[url] = current_state
-                                v_status = (verified_state.get("stock_status", "unknown") if verified_state else "no response").upper()
-                                print(f"  Verification failed ({v_status})")
-                                # Save only if definitive non-unknown
-                                if verified_state and verified_state.get("stock_status") not in ("unknown", None):
-                                    save_product(url, verified_state.get("name") or current_state.get("name"), False)
-                                elif current_state.get("stock_status") not in ("unknown", None):
-                                    save_product(url, current_state.get("name"), False)
-
-                        else:
-                            # No change to verify — commit immediately
+                    for future in as_completed(futures):
+                        current_state, change = future.result()
+                        if current_state:
                             direct_state[url] = current_state
                             detailed_status = current_state.get("stock_status", "unknown").upper()
-                            if is_dormant and detailed_status == "OUT":
-                                pass
-                            elif detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
-                                print(f"{detailed_status} - ping already sent")
+
+                            if change and not first_run:
+                                print(f" Potential {change.get('type', 'change')} - verifying...", end=" ")
+                                time.sleep(5)
+                                verified_state, _ = check_direct_product(
+                                    url, direct_state.get(url), file_stats,
+                                    store_file=file_path, is_verification=True, is_dormant=is_dormant
+                                )
+                                if verified_state:
+                                    verified_status = verified_state.get("stock_status", "unknown")
+                                    if verified_status in ("in", "preorder"):
+                                        direct_state[url]["in_stock"] = True
+                                        last_alerted = direct_state[url].get("last_alerted")
+                                        if not should_alert(last_alerted):
+                                            print(f" {'PREORDER' if verified_status == 'preorder' else 'IN STOCK'} (no alert)")
+                                        else:
+                                            franchise_changes += 1
+                                            file_stats['alerts'] += 1
+                                            is_preorder = verified_status == "preorder"
+                                            print(f" {'PREORDER CONFIRMED!' if is_preorder else 'RESTOCK CONFIRMED!'}")
+                                            img = verified_state.get("image_url") or change.get("image_url")
+                                            prc = verified_state.get("price") or change.get("price")
+                                            send_alert(
+                                                change['name'], change["url"], _host_for_url(url),
+                                                is_preorder=is_preorder, is_new=False,
+                                                image_url=img, price=prc,
+                                                store_file=file_path
+                                            )
+                                            direct_state[url]["last_alerted"] = datetime.now(timezone.utc)
+                                            save_product(url, current_state["name"], True)
+                                            mark_alerted(url)
+                                    else:
+                                        print(f" Verification failed ({verified_status.upper()})")
+                                        save_product(url, current_state["name"], False)
+                                else:
+                                    print(f" Verification failed (no response)")
                             else:
-                                print(f"{detailed_status}")
+                                if is_dormant and detailed_status == "OUT":
+                                    pass
+                                elif detailed_status in ("IN", "PREORDER") and prev_state and prev_state.get("in_stock"):
+                                    print(f"{detailed_status} - ping already sent")
+                                else:
+                                    print(f"{detailed_status}")
 
-                        # Fix 1 (DB): write DB based on the state we actually committed, not raw current_state.
-                        committed_state = direct_state.get(url)
-                        if committed_state and committed_state.get("stock_status") != "unknown":
                             prev_in_stock = prev_state.get("in_stock") if prev_state else None
-                            if committed_state.get("in_stock") != prev_in_stock:
-                                save_product(url, committed_state.get("name"), committed_state.get("in_stock"))
+                            if current_state["in_stock"] != prev_in_stock:
+                                save_product(url, current_state["name"], current_state["in_stock"])
 
-                    # Optional B: domain-aware jitter sleep
-                    _sleep_domain = _host_for_url(url) or ""
-                    _base = 1.5 if _sleep_domain in HOSTILE_DOMAINS else 0.6
-                    time.sleep(_base + random.random() * 1.2)
+                    # small delay per URL + jitter
+                    time.sleep(max(1, 1 + random.uniform(-0.5, 1.5)))
 
                 if not is_dormant:
                     HOURLY_STATS[file_name]['fetched'] += file_stats['fetched']
@@ -2024,7 +1512,7 @@ def main():
                 stats['fetched'] += file_stats['fetched']
                 stats['failed'] += file_stats['failed']
 
-            print(f"\n  {franchise_name}: {franchise_changes} alerts sent")
+            print(f"\n {franchise_name}: {franchise_changes} alerts sent")
             print(f"   Stats: {stats['fetched']} fetched, {stats['failed']} failed")
 
             total_cycle_changes += franchise_changes
@@ -2032,23 +1520,24 @@ def main():
             total_stats['failed'] += stats['failed']
 
         cycle_time = round(time.time() - cycle_start, 1)
+
         TOTAL_SCANS += 1
         DAILY_SCANS += 1
 
         if first_run:
             print(f"\n{'='*50}")
-            print(f"  Initial scan complete! Tracking {len(direct_state)} products")
+            print(f" Initial scan complete! Tracking {len(direct_state)} products")
             print("   Future changes will trigger Discord alerts.")
             print(f"{'='*50}\n")
             first_run = False
         else:
             print(f"\n{'='*50}")
             if total_cycle_changes > 0:
-                print(f"  Cycle complete. {total_cycle_changes} total alerts sent.")
+                print(f" Cycle complete. {total_cycle_changes} total alerts sent.")
             else:
-                print(f"  Cycle complete. No changes detected.")
+                print(f" Cycle complete. No changes detected.")
 
-        print(f"  Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | {header_type} | Cycle: {cycle_time}s")
+        print(f" Total: {total_stats['fetched']} fetched, {total_stats['failed']} failed | {header_type} | Cycle: {cycle_time}s")
 
         now_utc = datetime.now(timezone.utc)
         now_london = now_utc.astimezone(ZoneInfo("Europe/London"))
@@ -2095,17 +1584,16 @@ def main():
                 try:
                     resp = SESSION.post(HOURLY_WEBHOOK, json={"content": hourly_summary}, timeout=10)
                     if resp.status_code == 204:
-                        print("  Sent hourly status ping")
+                        print(" Sent hourly status ping")
                     else:
-                        print(f"  Hourly ping returned HTTP {resp.status_code}: {resp.text[:100]}")
+                        print(f" Hourly ping returned HTTP {resp.status_code}: {resp.text[:100]}")
                     LAST_HOURLY_PING = current_hour
                     save_ping_state("hourly", current_hour)
                     HOURLY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in HOURLY_STATS.items()}
-                    with HOURLY_FAILED_DETAILS_LOCK:
-                        HOURLY_FAILED_DETAILS.clear()
+                    HOURLY_FAILED_DETAILS.clear()
                     TOTAL_SCANS = 0
                 except Exception as e:
-                    print(f"  Hourly ping failed: {e}")
+                    print(f" Hourly ping failed: {e}")
 
         # DAILY PING
         if DAILY_WEBHOOK := os.getenv("DAILYDATA"):
@@ -2139,17 +1627,17 @@ def main():
                 try:
                     resp = SESSION.post(DAILY_WEBHOOK, json={"content": daily_summary}, timeout=10)
                     if resp.status_code == 204:
-                        print("  Sent daily status ping (8 AM UK time)")
+                        print(" Sent daily status ping (8 AM UK time)")
                     else:
-                        print(f"  Daily ping returned HTTP {resp.status_code}: {resp.text[:100]}")
+                        print(f" Daily ping returned HTTP {resp.status_code}: {resp.text[:100]}")
                     LAST_DAILY_PING = current_day
                     save_ping_state("daily", current_day)
                     DAILY_STATS = {k: {'fetched': 0, 'failed': 0, 'alerts': 0, 'products': v['products']} for k, v in DAILY_STATS.items()}
                     DAILY_SCANS = 0
                 except Exception as e:
-                    print(f"  Daily ping failed: {e}")
+                    print(f" Daily ping failed: {e}")
 
-        print(f"  Next scan in {CHECK_INTERVAL} seconds...\n")
+        print(f" Next scan in {CHECK_INTERVAL} seconds...\n")
         time.sleep(CHECK_INTERVAL)
 
 
