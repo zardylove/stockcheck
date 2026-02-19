@@ -17,8 +17,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
 
-# NEW: Import stealth
-from playwright_stealth import stealth_sync
+# Correct stealth import (lowercase 'stealth')
+from playwright_stealth import stealth
 
 # =========================================================
 #  PLAYWRIGHT (optional but supported)
@@ -444,8 +444,8 @@ def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: st
             context = browser.new_context(**context_kwargs)
             page = context.new_page()
 
-            # Apply full stealth suite — this is the key upgrade
-            stealth_sync(page)
+            # Apply full stealth — this is the key line
+            stealth(page)  # <-- Correct v2 call: stealth(page)
 
             # Auto-accept consent banners (OneTrust common on UK retail)
             consent_selectors = [
@@ -466,21 +466,20 @@ def fetch_html_playwright(url: str, timeout_ms: int, use_proxy: bool, domain: st
                 except:
                     continue
 
-            # Keep your resource blocking (optional but good for speed)
+            # Block heavy resources (keep images/fonts if needed for layout)
             def route_filter(route):
                 rt = route.request.resource_type
-                if rt in ("image", "media", "font"):
+                if rt in ("media", "font"):  # removed "image" and "stylesheet" for realism
                     return route.abort()
                 return route.continue_()
-
             page.route("**/*", route_filter)
 
-            # Human-like startup behavior
-            page.evaluate("() => window.scrollTo(0, 150)")
-            time.sleep(random.uniform(0.4, 1.1))
+            # Human-like startup: small scroll + delay
+            page.evaluate("() => window.scrollTo(0, random.randint(100, 400))")
+            time.sleep(random.uniform(0.5, 1.5))
 
-            # Goto with shorter timeout to avoid hanging forever
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=20000)  # 20 seconds max
+            # Goto with 20-second timeout
+            resp = page.goto(url, wait_until="domcontentloaded", timeout=20000)
             status = resp.status if resp else 0
             html = page.content() or ""
             final_url = page.url
