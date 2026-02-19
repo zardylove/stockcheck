@@ -1526,10 +1526,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
     # Initialise per-domain health tracking (single-threaded loop: lock only for init)
     with DOMAIN_HEALTH_LOCK:
         health = DOMAIN_HEALTH.setdefault(domain, {
-            "strategy": (
-                "requests" if domain in HOSTILE_DOMAINS
-                else ("playwright" if domain in FORCE_PLAYWRIGHT_DOMAINS else "requests")
-            ),
+            "strategy": ("playwright" if domain in FORCE_PLAYWRIGHT_DOMAINS else "requests"),
             "use_proxy": (
                 domain in PROXY_REQUIRED_DOMAINS and domain not in PROXY_BANNED_DOMAINS
             ),
