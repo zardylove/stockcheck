@@ -60,7 +60,9 @@ PROXY_BANNED_DOMAINS = {
     "thetoyplanet.co.uk",
 }
 
-PLAYWRIGHT_DOMAINS = {
+# Domains that are hostile / unreliable and must ALWAYS use Playwright
+FORCE_PLAYWRIGHT_DOMAINS = {
+    "johnlewis.com",
     "argos.co.uk",
     "freemans.com",
     "currys.co.uk",
@@ -71,7 +73,6 @@ PLAYWRIGHT_DOMAINS = {
     "hillscards.co.uk",
     "hmv.com",
     "jdwilliams.co.uk",
-    "johnlewis.com",
     "sportsdirect.com",
     "very.co.uk",
     "waylandgames.co.uk",
@@ -155,7 +156,7 @@ def playwright_proxy_for_url(url: str):
 
 def should_use_playwright(url: str) -> bool:
     host = _host_for_url(url)
-    return host in PLAYWRIGHT_DOMAINS if host else False
+    return host in FORCE_PLAYWRIGHT_DOMAINS if host else False
 
 
 # =========================================================
@@ -637,36 +638,24 @@ BLOCKED_MARKERS = [
 def fetch_html_requests(url: str, headers: dict, timeout_s: int, use_proxy: bool, domain: str):
     """
     Requests-based fetch with split connect/read timeouts.
-    Suggestion 2: uses curl_cffi (Chrome TLS fingerprint) for hostile domains.
-    Suggestion 1: captures Accept-CH response headers for replay.
+    Stable version (no curl_cffi).
     """
     proxies = proxies_for_url(url) if use_proxy else None
+
+    # Split timeouts: fast fail on connect, reasonable read window
     connect_t = 4
     read_t = max(5, min(timeout_s, 12))
 
-    # Suggestion 2: curl_cffi impersonates Chrome's TLS handshake for hostile domains
-    if CURL_CFFI_AVAILABLE and domain in HOSTILE_DOMAINS:
-        try:
-            r = cffi_requests.get(
-                url,
-                headers=headers,
-                timeout=(connect_t, read_t),
-                proxies=proxies,
-                impersonate="chrome122",
-                allow_redirects=True,
-            )
-            capture_client_hints(domain, dict(r.headers))
-            return r.status_code, str(r.url), r.text
-        except Exception as e:
-            print(f"  curl_cffi failed for {domain}, falling back to requests: {e}")
-
     session = get_session_for_domain(domain)
+
     r = session.get(
-        url, headers=headers,
+        url,
+        headers=headers,
         timeout=(connect_t, read_t),
         proxies=proxies,
         allow_redirects=True,
     )
+
     capture_client_hints(domain, dict(r.headers))
     return r.status_code, r.url, r.text
 
@@ -849,10 +838,18 @@ def fetch_html(
     timeout_s = min(timeout_s, MAX_TIMEOUT)
     previous_state = previous_state or {}
     is_hostile = domain in HOSTILE_DOMAINS
+    # Hard override: some sites blackhole requests; use Playwright always.
+    if domain in FORCE_PLAYWRIGHT_DOMAINS and PLAYWRIGHT_AVAILABLE:
+        return fetch_html_playwright(
+            url,
+            timeout_ms=timeout_s * 1000,
+            use_proxy=use_proxy,
+            domain=domain
+        )
 
     justified_playwright = (
         strategy == "playwright"
-        or (domain in PLAYWRIGHT_DOMAINS and not is_hostile)
+        or (domain in FORCE_PLAYWRIGHT_DOMAINS and not is_hostile)
     )
 
     if is_hostile and PLAYWRIGHT_AVAILABLE:
@@ -1531,7 +1528,7 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
         health = DOMAIN_HEALTH.setdefault(domain, {
             "strategy": (
                 "requests" if domain in HOSTILE_DOMAINS
-                else ("playwright" if domain in PLAYWRIGHT_DOMAINS else "requests")
+                else ("playwright" if domain in FORCE_PLAYWRIGHT_DOMAINS else "requests")
             ),
             "use_proxy": (
                 domain in PROXY_REQUIRED_DOMAINS and domain not in PROXY_BANNED_DOMAINS
@@ -1828,7 +1825,6 @@ def check_direct_product(url, previous_state, stats, store_file=None, is_verific
 # =========================================================
 CHECK_INTERVAL = 5
 
-
 def main():
     global CURRENT_FRANCHISE, CURRENT_WEBHOOK, CURRENT_ROLE_ID, USE_MOBILE_HEADERS
     global TOTAL_SCANS, DAILY_SCANS, LAST_HOURLY_PING, LAST_DAILY_PING
@@ -1840,8 +1836,9 @@ def main():
     print(f"   Franchises: {', '.join(f['name'] for f in FRANCHISES)}")
     print(f"   Playwright available: {PLAYWRIGHT_AVAILABLE}")
     print(f"   curl_cffi available: {CURL_CFFI_AVAILABLE}")
+
     if PLAYWRIGHT_AVAILABLE:
-        print(f"   Playwright domains: {', '.join(sorted(PLAYWRIGHT_DOMAINS))}")
+        print(f"   Force Playwright domains: {', '.join(sorted(FORCE_PLAYWRIGHT_DOMAINS))}")
 
     db_ok = init_db_pool()
     if not db_ok:
